@@ -1,0 +1,25 @@
+## .NET
+bin/
+obj/
+out/
+artifacts/
+*.user
+*.suo
+.vs/
+.idea/
+*.DotSettings.user
+
+## macOS
+.DS_Store
+
+## Test / coverage
+TestResults/
+coverage*.xml
+*.trx
+
+## Local secrets
+appsettings.Local.json
+.env
+
+# Claude Code yerel oturum dosyaları (izinler, önizleme, çalışma ağaçları)
+.claude/

@@ -1,0 +1,221 @@
+@page "/l/{Slug}"
+@using Poyra.Modules.Installments.Features
+@using Poyra.Modules.PaymentLinks.Contracts
+@inject ICheckoutLinkResolver Links
+@inject IDispatcher Dispatcher
+@inject ITenantBrandingSource BrandingSource
+
+@if (_link is null)
+{
+    <PageTitle>Bağlantı bulunamadı</PageTitle>
+    <div class="card center failure">
+        <div class="mark err" aria-hidden="true">!</div>
+        <h1>Bağlantı bulunamadı</h1>
+        <p class="hint">Bu ödeme bağlantısı geçersiz olabilir. Lütfen bağlantıyı gönderenle iletişime geçin.</p>
+    </div>
+}
+else if (_link.UnavailableReason is { } reason)
+{
+    <PageTitle>Ödeme yapılamıyor</PageTitle>
+    <MerchantBrand Branding="_brand" />
+    <div class="card center failure" style="--marka: @(_brand?.PrimaryColor ?? "#C4713B")">
+        <div class="mark err" aria-hidden="true">!</div>
+        <h1>Ödeme yapılamıyor</h1>
+        <p>@reason</p>
+        <p class="hint">Sorunun sürdüğünü düşünüyorsanız bağlantıyı gönderenle iletişime geçin.</p>
+    </div>
+    <MerchantFooter Branding="_brand" />
+}
+else
+{
+    <PageTitle>@_link.Description — @(_brand?.DisplayName ?? "Ödeme")</PageTitle>
+
+    <MerchantBrand Branding="_brand" />
+
+    <div class="card" style="--marka: @(_brand?.PrimaryColor ?? "#C4713B")">
+        <h1>@_link.Description</h1>
+
+        @if (_link.AmountMinor is { } fixedAmount)
+        {
+            <p class="amount">@Money(fixedAmount, _link.Currency)</p>
+        }
+
+        @if (Hata is { Length: > 0 })
+        {
+            <div class="alert error" role="alert">@Hata</div>
+        }
+
+        @if (_link.AmountMinor is null)
+        {
+
+            <label>
+                Tutar (₺)
+                <input id="tutar-alani" type="number" name="amountLira" form="odeme-formu"
+                       step="0.01" min="0.01" inputmode="decimal"
+                       value="@(Tutar > 0 ? (Tutar / 100m).ToString("0.00", Invariant) : "")"
+                       required autofocus />
+            </label>
+        }
+
+        @if (_link.MaxInstallments > 1)
+        {
+            <form id="taksit-formu" method="post" action="/l/@Slug/taksit" class="bin-form">
+                <label>
+                    Taksit seçenekleri için kartınızın ilk 6 hanesi
+                    <input type="text" name="bin" inputmode="numeric" pattern="[0-9]{6}"
+                           maxlength="6" required autocomplete="off"
+                           title="Kartınızın yalnız ilk 6 hanesi"
+                           value="@Bin" placeholder="540061" />
+                </label>
+                <p class="hint">Kart numaranızın tamamını girmeyin — taksitler için ilk 6 hane yeterli.</p>
+                @if (_link.AmountMinor is null)
+                {
+                    <noscript>
+                        <label>
+                            Tutar (₺)
+                            <input type="number" name="amountLira" step="0.01" min="0.01" inputmode="decimal"
+                                   value="@(Tutar > 0 ? (Tutar / 100m).ToString("0.00", Invariant) : "")" />
+                        </label>
+                    </noscript>
+                }
+                <button type="submit" class="ghost">
+                    @(_options.Count > 0 ? "Taksitleri güncelle" : "Taksitleri göster")
+                </button>
+                @if (_quoteAttempted && _options.Count == 0)
+                {
+                    <p class="hint">Bu kart için taksit seçeneği bulunamadı — ödemeye tek çekim olarak devam edebilirsiniz.</p>
+                }
+            </form>
+        }
+
+        <form id="odeme-formu" method="post" action="/l/@Slug/ode">
+            @if (_options.Count > 0)
+            {
+                var baseAmount = _link.AmountMinor ?? Tutar;
+                <fieldset class="installments">
+                    <legend>Ödeme seçeneği</legend>
+                    @foreach (var option in _options)
+                    {
+                        var fark = option.TotalAmountMinor - baseAmount;
+                        <label class="option">
+                            <input type="radio" name="installments" value="@option.InstallmentCount"
+                                   checked="@(option.InstallmentCount == 1)" />
+                            <span class="label">
+                                @(option.InstallmentCount == 1 ? "Tek çekim" : $"{option.InstallmentCount} taksit")
+                            </span>
+                            <span class="detail">
+                                <span class="total">@Money(option.TotalAmountMinor, _link.Currency)</span>
+                                @if (option.InstallmentCount > 1)
+                                {
+                                    <span class="permonth">@Money(option.MonthlyAmountMinor, _link.Currency) × @option.InstallmentCount ay</span>
+                                }
+                                @if (baseAmount > 0 && fark > 0)
+                                {
+                                    <span class="surcharge">+@Money(fark, _link.Currency) vade farkı</span>
+                                }
+                                else if (baseAmount > 0 && fark == 0)
+                                {
+                                    <span class="nofee">Vade farkı yok</span>
+                                }
+                            </span>
+                        </label>
+                    }
+                </fieldset>
+            }
+
+            <input type="hidden" name="bin" value="@Bin" />
+            <button type="submit" class="pay">Güvenli ödemeye geç</button>
+
+            <p class="trust">
+                <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
+                    <rect x="1" y="6" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+                    <path d="M3.5 6V4.5a2.5 2.5 0 0 1 5 0V6" stroke="currentColor" stroke-width="1.4"/>
+                </svg>
+                Kart bilgileriniz bankanızın güvenli sayfasında alınır · 3D Secure
+            </p>
+        </form>
+    </div>
+
+    @if (_link.AmountMinor is null && _link.MaxInstallments > 1)
+    {
+        @((MarkupString)AmountSyncScript)
+    }
+
+    <MerchantFooter Branding="_brand" />
+}
+
+@code {
+    private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
+    private static readonly CultureInfo Tr = CultureInfo.GetCultureInfo("tr-TR");
+
+    private const string AmountSyncScript = """
+        <script>
+        (function () {
+            var f = document.getElementById('taksit-formu');
+            if (!f) return;
+            f.addEventListener('submit', function () {
+                var t = document.getElementById('tutar-alani');
+                if (!t || !t.value) return;
+                var h = f.querySelector('input[type=hidden][name=amountLira]');
+                if (!h) {
+                    h = document.createElement('input');
+                    h.type = 'hidden';
+                    h.name = 'amountLira';
+                    f.appendChild(h);
+                }
+                h.value = t.value;
+            });
+        })();
+        </script>
+        """;
+
+    [Parameter]
+    public string Slug { get; set; } = "";
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    [SupplyParameterFromQuery(Name = "bin")]
+    private string? Bin { get; set; }
+
+    [SupplyParameterFromQuery(Name = "tutar")]
+    private long Tutar { get; set; }
+
+    private CheckoutLink? _link;
+    private CheckoutBranding? _brand;
+    private IReadOnlyList<QuoteOptionDto> _options = [];
+    private bool _quoteAttempted;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _link = await Links.ResolveAsync(Slug, default);
+        if (_link is null)
+            return;
+
+        _brand = Localize(await BrandingSource.GetAsync(_link.TenantId, default));
+        if (_link.UnavailableReason is not null)
+            return;
+
+        var amount = _link.AmountMinor ?? Tutar;
+        if (Bin is not { Length: 6 } || amount <= 0 || _link.MaxInstallments <= 1)
+            return;
+
+        _quoteAttempted = true;
+        var quote = await Dispatcher.Ask(new QuoteInstallmentsQuery(Bin, amount));
+        _options = quote.Options
+            .Where(o => o.InstallmentCount <= _link.MaxInstallments)
+            .GroupBy(o => o.InstallmentCount)
+            .Select(g => g.OrderBy(o => o.TotalAmountMinor).First())
+            .OrderBy(o => o.InstallmentCount)
+            .ToList();
+    }
+
+    private CheckoutBranding Localize(CheckoutBranding brand)
+        => brand.LogoUrl is null ? brand : brand with { LogoUrl = $"/l/{Slug}/logo" };
+
+    private static string Money(long amountMinor, string currency)
+    {
+        var symbol = currency switch { "TRY" => "₺", "USD" => "$", "EUR" => "€", _ => currency };
+        return $"{(amountMinor / 100m).ToString("N2", Tr)} {symbol}";
+    }
+}

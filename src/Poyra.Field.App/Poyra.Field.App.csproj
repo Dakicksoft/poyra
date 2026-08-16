@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Directory.Build.props tek TargetFramework dayatır; MAUI çok hedeflidir.
+         Android ÖNCE: saha ekiplerinin cihazı pratikte Android'dir (TR'de kurumsal
+         saha telefonları neredeyse tümüyle Android). iOS sonra eklenecek. -->
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net10.0-android</TargetFrameworks>
+    <!-- Android JDK 21 gerektirir; kodun kendisi bu hedefle de tip denetiminden geçer -->
+    <TargetFrameworks Condition="'$(PoyraTypeCheckOnly)' == 'true'">net10.0-maccatalyst</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <RootNamespace>Poyra.Field.App</RootNamespace>
+
+    <ApplicationTitle>Poyra Saha</ApplicationTitle>
+    <ApplicationId>com.poyra.field</ApplicationId>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+
+    <SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <!--
+    Android araç zinciri JDK 21 ister ve JDK 26 ile derlemeyi REDDEDER (XA0030).
+    macOS'ta `java_home`, Homebrew FORMÜLÜ olarak kurulan openjdk'yi görmez —
+    /Library/Java/JavaVirtualMachines'e bağlanması sudo gerektirir. Bu yüzden yaygın
+    kurulum yerleri burada denenir: kullanıcı `dotnet build -f net10.0-android`
+    yazdığında elle bayrak vermek zorunda kalmasın.
+
+    Sıra bilinçli: kullanıcının kendi JavaSdkDirectory'si > JAVA_HOME > bulunanlar.
+    Hiçbiri yoksa özellik boş kalır ve Android SDK kendi aramasını yapar; hata
+    mesajı da (XA0030/XA5300) kendi anlamını korur.
+  -->
+  <PropertyGroup Condition="'$(JavaSdkDirectory)' == '' AND '$([MSBuild]::IsOSPlatform(`OSX`))' == 'true'">
+    <_PoyraJdk21Homebrew>/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home</_PoyraJdk21Homebrew>
+    <_PoyraJdk21Temurin>/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home</_PoyraJdk21Temurin>
+    <_PoyraJdk21Msft>$(USERPROFILE)/Library/Developer/Xamarin/jdk/microsoft_dist_openjdk_21</_PoyraJdk21Msft>
+
+    <JavaSdkDirectory Condition="'$(JAVA_HOME)' != '' AND Exists('$(JAVA_HOME)/bin/jar')">$(JAVA_HOME)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' AND Exists('$(_PoyraJdk21Homebrew)/bin/jar')">$(_PoyraJdk21Homebrew)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' AND Exists('$(_PoyraJdk21Temurin)/bin/jar')">$(_PoyraJdk21Temurin)</JavaSdkDirectory>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' AND Exists('$(_PoyraJdk21Msft)/bin/jar')">$(_PoyraJdk21Msft)</JavaSdkDirectory>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Poyra.Field.Core\Poyra.Field.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" />
+  </ItemGroup>
+
+</Project>

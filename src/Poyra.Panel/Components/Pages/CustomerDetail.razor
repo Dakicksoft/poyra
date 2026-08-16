@@ -1,0 +1,329 @@
+@page "/musteriler/{CustomerRef}"
+@attribute [Authorize]
+@using Poyra.Modules.Customers.Features
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>@CustomerRef — Poyra</PageTitle>
+
+<p class="crumb"><a href="/musteriler">← Müşteriler</a></p>
+
+@if (_detail is null)
+{
+    <h1>Müşteri bulunamadı</h1>
+    <p class="empty">Bu referansla bir müşteri yok: <span class="mono">@CustomerRef</span></p>
+}
+else
+{
+    var customer = _detail.Customer;
+
+    <h1>@(customer.Name ?? CustomerRef)</h1>
+    <p class="lead mono">@CustomerRef</p>
+
+    @if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+    {
+        <div class="alert ok" role="status">@sonucMesaj</div>
+    }
+    @if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+    {
+        <div class="alert err" role="alert">@hataMesaj</div>
+    }
+
+    @if (customer.Erased)
+    {
+        <div class="alert warn" role="status">
+            <strong>KVKK silme talebi uygulandı</strong> (@Fmt.Date(customer.ErasedAt!.Value)) —
+            kişisel veri silindi. Mali kayıtlar saklama yükümlülüğü gereği (VUK 5 yıl,
+            TTK 10 yıl) duruyor ve aşağıda görünüyor.
+        </div>
+    }
+
+    <div class="tiles">
+        <div class="tile">
+            <span class="label">Yaşam boyu değer</span>
+            <span class="value">@Fmt.Money(_detail.Totals.SucceededMinor - _detail.Totals.RefundedMinor, "TRY")</span>
+            <span class="sub">@_detail.Totals.Count ödeme</span>
+        </div>
+        <div class="tile @(_detail.Totals.RefundedMinor > 0 ? "warn" : "")">
+            <span class="label">İade</span>
+            <span class="value">@Fmt.Money(_detail.Totals.RefundedMinor, "TRY")</span>
+            <span class="sub">geri ödendi</span>
+        </div>
+        <div class="tile">
+            <span class="label">Kayıtlı kart</span>
+            <span class="value">@_detail.Cards.Count(c => !c.Removed)</span>
+            <span class="sub">@_detail.Cards.Count(c => c.Removed) kaldırılmış</span>
+        </div>
+        <div class="tile @(_detail.Mandates.Any(m => m.Active) ? "" : "warn")">
+            <span class="label">Aktif talimat</span>
+            <span class="value">@_detail.Mandates.Count(m => m.Active)</span>
+            <span class="sub">tekrarlayan çekim onayı</span>
+        </div>
+    </div>
+
+    @if (!customer.Erased)
+    {
+        <div class="summary">
+            <div><span class="label">E-posta</span> @(customer.Email ?? "—")</div>
+            <div><span class="label">Telefon</span> <span class="mono">@(customer.Phone ?? "—")</span></div>
+            @if (customer.Notes is { Length: > 0 } notes)
+            {
+                <div><span class="label">Not</span> @notes</div>
+            }
+        </div>
+    }
+
+    <h2>Ödemeler</h2>
+    @if (_detail.Payments.Count == 0)
+    {
+        <p class="empty">Ödeme yok.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ödeme</th>
+                        <th class="num">Tutar</th>
+                        <th>Durum</th>
+                        <th>Taksit</th>
+                        <th>Kart</th>
+                        <th>Tarih</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var payment in _detail.Payments)
+                    {
+                        <tr>
+                            <td class="mono">
+                                <a href="/odemeler/@payment.PaymentId" title="@payment.PaymentId">
+                                    @Fmt.ShortId(payment.PaymentId)
+                                </a>
+                            </td>
+                            <td class="num mono">@Fmt.Money(payment.AmountMinor, payment.Currency)</td>
+                            <td><span class="badge @Fmt.StatusClass(payment.Status)">@Fmt.PaymentStatus(payment.Status)</span></td>
+                            <td>@(payment.Installments > 1 ? $"{payment.Installments}x" : "Tek çekim")</td>
+                            <td class="mono">@(payment.MaskedPan ?? "—")</td>
+                            <td class="mono">@Fmt.Date(payment.CreatedAt)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h2>Kayıtlı kartlar</h2>
+    @if (_detail.Cards.Count == 0)
+    {
+        <p class="empty">Kayıtlı kart yok.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Kart</th>
+                        <th>Marka</th>
+                        <th>Geçerlilik</th>
+                        <th>Durum</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var card in _detail.Cards)
+                    {
+                        <tr class="@(card.Removed ? "muted-row" : "")">
+                            <td class="mono">@card.MaskedPan</td>
+                            <td>@card.Brand</td>
+                            <td class="mono">@card.ExpiryMonth.ToString("00")/@card.ExpiryYear</td>
+                            <td>
+                                <span class="badge @(card.Removed ? "muted" : "ok")">
+                                    @(card.Removed ? "Kaldırıldı" : "Aktif")
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h2>Abonelikler</h2>
+    @if (_detail.Subscriptions.Count == 0)
+    {
+        <p class="empty">Abonelik yok.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Abonelik</th>
+                        <th>Plan</th>
+                        <th class="num">Tutar</th>
+                        <th>Durum</th>
+                        <th>Dönem sonu</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var subscription in _detail.Subscriptions)
+                    {
+                        <tr>
+                            <td class="mono">
+                                <a href="/abonelikler/@subscription.SubscriptionId"
+                                   title="@subscription.SubscriptionId">
+                                    @Fmt.ShortId(subscription.SubscriptionId)
+                                </a>
+                            </td>
+                            <td>@subscription.PlanName</td>
+                            <td class="num mono">@Fmt.Money(subscription.AmountMinor, "TRY")</td>
+                            <td>
+                                <span class="badge info">@Fmt.SubscriptionStatus(subscription.Status)</span>
+                                @if (subscription.NeedsCardUpdate)
+                                {
+                                    <span class="badge warn">Kart güncellenmeli</span>
+                                }
+                            </td>
+                            <td class="mono">@Fmt.Date(subscription.CurrentPeriodEnd)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h2>Ödeme talimatları</h2>
+    <p class="hint">
+        Talimat, müşterinin tekrarlayan çekime verdiği <strong>onaydır</strong> ve
+        "yetkisiz işlem" itirazında sunulacak ilk belgedir: ne zaman, hangi metin
+        sürümüyle, hangi IP'den.
+    </p>
+
+    @if (_detail.Mandates.Count == 0)
+    {
+        <p class="empty">Talimat yok.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Talimat</th>
+                        <th>Kart</th>
+                        <th>Tür</th>
+                        <th>Metin sürümü</th>
+                        <th>Onay</th>
+                        <th>Durum</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var mandate in _detail.Mandates)
+                    {
+                        <tr class="@(mandate.Active ? "" : "muted-row")">
+                            <td class="mono"><span class="id-cell" title="@mandate.Id">@mandate.Id</span></td>
+                            <td class="mono"><span class="id-cell" title="@mandate.CardToken">@mandate.CardToken</span></td>
+                            <td>@TypeText(mandate.Type)</td>
+                            <td class="mono">@mandate.TextVersion</td>
+                            <td class="mono">
+                                @Fmt.Date(mandate.AcceptedAt)
+                                <div class="hint">@(mandate.AcceptedIp ?? "IP yok")</div>
+                            </td>
+                            <td>
+                                <span class="badge @(mandate.Active ? "ok" : "muted")">
+                                    @(mandate.Active ? "Aktif" : "İptal")
+                                </span>
+                                @if (mandate.RevokedReason is { Length: > 0 } reason)
+                                {
+                                    <div class="hint">@reason</div>
+                                }
+                            </td>
+                            <td>
+                                @if (_canWrite && mandate.Active)
+                                {
+                                    <form method="post" action="/musteriler/talimat/@mandate.Id/iptal">
+                                        <AntiforgeryToken />
+                                        <button type="submit" class="link danger">İptal et</button>
+                                    </form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (_canWrite && !customer.Erased)
+    {
+        var erasable = new[]
+        {
+            customer.Name is { Length: > 0 } ? "ad" : null,
+            customer.Email is { Length: > 0 } ? "e-posta" : null,
+            customer.Phone is { Length: > 0 } ? "telefon" : null,
+            customer.Notes is { Length: > 0 } ? "not" : null,
+        }.Where(field => field is not null).ToList();
+        var activeMandates = _detail.Mandates.Count(m => m.Active);
+
+        <h2>KVKK silme talebi</h2>
+        <p class="hint">
+            Kişisel veri (ad, e-posta, telefon, not) silinir; <strong>mali kayıt kalır</strong> —
+            silme hakkı, VUK/TTK saklama yükümlülüğünü ortadan kaldırmaz. Açık ödeme
+            talimatları da iptal edilir ve işlem <strong>geri alınamaz</strong>.
+        </p>
+        <p>
+            Silinecek: <strong>@(erasable.Count > 0
+                ? string.Join(", ", erasable)
+                : "dolu kişisel alan yok")</strong> —
+            iptal edilecek açık talimat: <strong>@activeMandates</strong>.
+        </p>
+        <form method="post" action="/musteriler/@CustomerRef/kvkk-sil" class="filters">
+            <AntiforgeryToken />
+            <label class="check">
+                <input type="checkbox" name="onay" value="1" required />
+                Kişisel veri silinecek, @activeMandates açık talimat iptal edilecek —
+                geri alınamaz, anladım
+            </label>
+            <label>
+                Yazılı onay
+                <input type="text" name="confirmRef" required pattern="@RefPattern"
+                       placeholder="Onay için müşteri referansını yazın"
+                       title="Onaylamak için referansı aynen yazın" autocomplete="off" />
+            </label>
+            <button type="submit" class="secondary danger">Kişisel veriyi sil</button>
+        </form>
+    }
+}
+
+@code {
+    [Parameter]
+    public string CustomerRef { get; set; } = "";
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private CustomerDetailDto? _detail;
+    private bool _canWrite;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canWrite = Session.HasRank(TenantRole.Operations);
+        _detail = await Dispatcher.Ask(new GetCustomerQuery(CustomerRef));
+    }
+
+    private string RefPattern => System.Text.RegularExpressions.Regex.Escape(CustomerRef);
+
+    private static string TypeText(string type) => type switch
+    {
+        "recurring" => "Abonelik",
+        "card_on_file" => "Kayıtlı kartla tek tık",
+        _ => type,
+    };
+}

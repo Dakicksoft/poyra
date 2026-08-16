@@ -1,0 +1,26 @@
+@page "/hata"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+
+<PageTitle>Hata — Poyra</PageTitle>
+
+<div class="brand big">
+    <span class="hub" aria-hidden="true"></span>
+    <span class="wordmark">poyra</span>
+</div>
+
+<div class="alert err" role="alert">
+    <strong>Beklenmeyen bir hata oluştu.</strong>
+    <p>İşlem kayıtlarınız güvende: ödeme defteri silinemez ve değiştirilemez.</p>
+    @if (HttpContext?.TraceIdentifier is { Length: > 0 } traceId)
+    {
+        <p class="mono">Hata kodu: @traceId</p>
+    }
+</div>
+
+<p><a href="/">Genel Bakış'a dön</a></p>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+}

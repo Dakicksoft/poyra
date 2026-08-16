@@ -1,0 +1,289 @@
+@page "/ekip"
+@attribute [Authorize]
+@using Poyra.Modules.Tenancy.Features.ApiKeyManagement
+@using Poyra.Modules.Tenancy.Features.Users
+@using Poyra.SharedKernel.Tenancy
+@using Poyra.Panel.Security
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+@inject OneTimeSecretStash Stash
+
+<PageTitle>Ekip ve anahtarlar — Poyra</PageTitle>
+
+<h1>Ekip ve anahtarlar</h1>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+@if (!string.IsNullOrEmpty(_anahtar))
+{
+    <div class="alert warn" role="alert">
+        <strong>Yeni API anahtarı (yalnız şimdi görünür):</strong>
+        <div class="mono secret">@_anahtar</div>
+        Sunucunuza kaydedin — bu sayfadan ayrılınca bir daha gösterilmez.
+        <button type="button" class="link"
+                onclick="navigator.clipboard.writeText(this.parentElement.querySelector('.secret').textContent.trim());this.textContent='Kopyalandı ✓'">
+            Kopyala
+        </button>
+    </div>
+}
+
+<h2>Kullanıcılar</h2>
+<p class="lead">
+    Kimin neye erişebildiği bir güvenlik sorusudur. Roller yukarıdan aşağıya kapsar:
+    <strong>owner</strong> → admin → developer → operations → finance → auditor.
+</p>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Kullanıcı</th>
+                <th>Rol</th>
+                <th>Durum</th>
+                <th>Katılma</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var member in _users)
+            {
+                <tr>
+                    <td>
+                        @member.DisplayName
+                        <div class="hint mono">@member.Email</div>
+                    </td>
+                    <td>
+                        @if (member.IsSelf)
+                        {
+                            <span class="badge info">@member.Role (siz)</span>
+                        }
+                        else if (_canManageUsers && CanEditRoleOf(member.Role))
+                        {
+                            <form method="post" action="/ekip/@member.UserId/rol" class="inline-form">
+                                <AntiforgeryToken />
+                                <select name="role" aria-label="Yeni rol">
+                                    @foreach (var role in _assignableRoles)
+                                    {
+                                        <option value="@role" selected="@(member.Role == role)">@RoleOptionText(role)</option>
+                                    }
+                                </select>
+                                <label class="check">
+                                    <input type="checkbox" name="onay" value="1" required />
+                                    Rol değişikliği anında geçerli olur — anladım
+                                </label>
+                                <button type="submit" class="ghost">Uygula</button>
+                            </form>
+                        }
+                        else
+                        {
+                            <span class="badge info">@member.Role</span>
+                        }
+                    </td>
+                    <td>
+                        <span class="badge @(member.IsActive ? "ok" : "muted")">
+                            @(member.IsActive ? "Aktif" : "Kapalı")
+                        </span>
+                        @if (!member.EmailVerified)
+                        {
+                            <div class="hint">e-posta doğrulanmadı</div>
+                        }
+                    </td>
+                    <td class="mono">@Fmt.Date(member.JoinedAt)</td>
+                    <td>
+                        @if (!member.IsSelf && _canManageUsers)
+                        {
+                            <form method="post" action="/ekip/@member.UserId/kaldir">
+                                <AntiforgeryToken />
+                                <label class="check">
+                                    <input type="checkbox" name="onay" value="1" required />
+                                    Erişimi ve açık oturumları anında kapatır — anladım
+                                </label>
+                                <button type="submit" class="link danger">Erişimi kaldır</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (_canManageUsers)
+{
+    <h3>Kullanıcı ekle</h3>
+    <form method="post" action="/ekip/ekle" class="filters">
+        <AntiforgeryToken />
+        <label>
+            E-posta
+            <input type="email" name="email" required />
+        </label>
+        <label>
+            Ad soyad
+            <input type="text" name="displayName" required minlength="2" maxlength="200" />
+        </label>
+        <label>
+            Geçici parola
+            <input type="password" name="password" required minlength="10" autocomplete="new-password" />
+        </label>
+        <label>
+            Rol
+            <select name="role">
+                @foreach (var role in _assignableRoles)
+                {
+                    <option value="@role" selected="@(role == "operations")">@RoleOptionText(role)</option>
+                }
+            </select>
+        </label>
+        <button type="submit" class="primary">Ekle</button>
+    </form>
+    <p class="hint">
+        Kullanıcı ilk girişte parolasını "Parolamı unuttum" ile kendisi değiştirebilir.
+        E-postası platformda zaten kayıtlıysa yeni hesap açılmaz, bu işyerine üyelik verilir.
+    </p>
+}
+
+<h2>API anahtarları</h2>
+<p class="lead">
+    Sunucudan sunucuya çağrılar bu anahtarla kimliklenir. Anahtar sızarsa
+    <strong>önce yenisini üretip dağıtın, sonra eskisini kapatın</strong> — tersi
+    tahsilatınızı anında durdurur.
+</p>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Ad</th>
+                <th>Önek</th>
+                <th>Durum</th>
+                <th>Oluşturma</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var key in _keys)
+            {
+                <tr class="@(key.Revoked ? "muted-row" : "")">
+                    <td>@key.Name</td>
+                    <td class="mono">@key.PrefixHint…</td>
+                    <td>
+                        <span class="badge @(key.Revoked ? "muted" : "ok")">
+                            @(key.Revoked ? "İptal" : "Aktif")
+                        </span>
+                        @if (key.RevokedAt is { } revoked)
+                        {
+                            <div class="hint">@Fmt.Date(revoked)</div>
+                        }
+                    </td>
+                    <td class="mono">@Fmt.Date(key.CreatedAt)</td>
+                    <td>
+                        @if (!key.Revoked && _canManageKeys)
+                        {
+                            <form method="post" action="/ekip/anahtar/@key.Id/iptal">
+                                <AntiforgeryToken />
+                                <label class="check">
+                                    <input type="checkbox" name="onay" value="1" required />
+                                    Bu anahtarı kullanan sunucular ANINDA 401 alır — anladım
+                                </label>
+                                <button type="submit" class="link danger">İptal et</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (_canManageKeys)
+{
+    <h3>Yeni anahtar</h3>
+    <form method="post" action="/ekip/anahtar" class="filters">
+        <AntiforgeryToken />
+        <label>
+            Ad
+            <input type="text" name="name" required minlength="2" maxlength="100"
+                   placeholder="Örn. Üretim sunucusu" />
+        </label>
+        <label class="check">
+            <input type="checkbox" name="live" value="true" />
+            Canlı anahtar (sk_live_…)
+        </label>
+        <button type="submit" class="primary">Anahtar üret</button>
+    </form>
+    <p class="hint">
+        Kayıt silinmez, iptal edilir: hangi anahtarın ne zaman kapatıldığı sızıntı
+        incelemesinin ilk sorusudur.
+    </p>
+}
+
+@code {
+    private IReadOnlyList<TenantUserDto> _users = [];
+    private IReadOnlyList<ApiKeyDto> _keys = [];
+
+    private bool _canManageUsers;
+    private bool _canManageKeys;
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private string? _anahtar;
+
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (HttpContext?.Request.Cookies[OneTimeSecretStash.CookieName] is { Length: > 0 } key)
+        {
+            _anahtar = Stash.Take(key);
+            HttpContext.Response.Cookies.Delete(OneTimeSecretStash.CookieName,
+                new CookieOptions { Path = "/ekip" });
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canManageUsers = Session.HasRank(TenantRole.Admin);
+        _canManageKeys = Session.HasRank(TenantRole.Owner);
+
+        _myRank = TenantRoleMap.FromDb.TryGetValue(Session.Role, out var mine)
+            ? mine
+            : TenantRole.Auditor;
+        _assignableRoles = TenantRoleMap.ToDb
+            .Where(kv => kv.Key <= _myRank)
+            .OrderByDescending(kv => kv.Key)
+            .Select(kv => kv.Value)
+            .ToArray();
+
+        _users = await Dispatcher.Ask(new ListUsersQuery());
+        _keys = await Dispatcher.Ask(new ListApiKeysQuery());
+    }
+
+    private TenantRole _myRank;
+    private string[] _assignableRoles = [];
+
+    private bool CanEditRoleOf(string role)
+        => TenantRoleMap.FromDb.TryGetValue(role, out var rank) && rank <= _myRank;
+
+
+    private static string RoleOptionText(string role) => role switch
+    {
+        "auditor" => "auditor — denetim ve uyum kayıtlarını görüntüler, inceleme açar",
+        "finance" => "finance — rapor ve mutabakatı görür, ERP ayarı yapar",
+        "operations" => "operations — işlem görüntüler, iade ve iptal başlatır",
+        "developer" => "developer — webhook uçlarını yönetir",
+        "admin" => "admin — kullanıcı, POS bağlantısı, rota ve risk kuralı yönetir",
+        "owner" => "owner — tüm yetkiler, API anahtarı yönetimi dahil",
+        _ => role,
+    };
+}

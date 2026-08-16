@@ -1,0 +1,320 @@
+@page "/abonelikler"
+@attribute [Authorize]
+@using Poyra.Modules.Subscriptions.Features
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>Abonelikler — Poyra</PageTitle>
+
+<h1>Abonelikler</h1>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+@if (_dunning.Count > 0)
+{
+    <div class="alert warn" role="status">
+        @_dunning.Count fatura kurtarma kuyruğunda —
+        toplam @Fmt.Money(_dunning.Sum(i => i.AmountMinor), "TRY") risk altında.
+    </div>
+
+    <h2>Kurtarma kuyruğu</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Fatura</th>
+                    <th>Abonelik</th>
+                    <th class="num">Tutar</th>
+                    <th>Deneme</th>
+                    <th>Son hata</th>
+                    <th>Sıradaki deneme</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var invoice in _dunning)
+                {
+                    <tr>
+                        <td class="mono"><span class="id-cell" title="@invoice.Id">@invoice.Id</span></td>
+                        <td class="mono">
+                            <a href="/abonelikler/@invoice.SubscriptionId" title="@invoice.SubscriptionId">
+                                @Fmt.ShortId(invoice.SubscriptionId)
+                            </a>
+                        </td>
+                        <td class="num mono">@Fmt.Money(invoice.AmountMinor, "TRY")</td>
+                        <td>@invoice.AttemptCount</td>
+                        <td><span class="badge err">@Fmt.Error(invoice.LastErrorCode)</span></td>
+                        <td class="mono">@(invoice.NextRetryAt is { } next ? Fmt.Date(next) : "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<h2>Abonelikler</h2>
+<form method="get" class="filters">
+    <label>
+        Durum
+        <select name="durum">
+            <option value="">Tümü</option>
+            @foreach (var status in StatusFilters)
+            {
+                <option value="@status" selected="@(Durum == status)">@Fmt.SubscriptionStatus(status)</option>
+            }
+        </select>
+    </label>
+    <label>
+        Müşteri referansı
+        <input type="search" name="musteri" value="@Musteri" placeholder="Örn. cust-1024" />
+    </label>
+    <button type="submit" class="ghost">Filtrele</button>
+</form>
+
+@if (_subscriptions.Count == 0)
+{
+    @if (HasFilter)
+    {
+        <div class="empty-state">
+            <p class="es-title">Filtreyle eşleşen abonelik yok</p>
+            <p class="es-hint"><a href="/abonelikler">Filtreyi temizle</a> — tüm abonelikleri gör.</p>
+        </div>
+    }
+    else
+    {
+        <div class="empty-state">
+            <p class="es-title">Henüz abonelik yok</p>
+            <p class="es-hint">
+                Abonelik, kayıtlı kartla <span class="mono">POST /v1/subscriptions</span>
+                çağrısıyla başlar — önce aşağıdan bir plan tanımlayın.
+            </p>
+        </div>
+    }
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Abonelik</th>
+                    <th>Müşteri</th>
+                    <th>Plan</th>
+                    <th>Durum</th>
+                    <th>Dönem sonu</th>
+                    <th>Kart</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var subscription in _subscriptions)
+                {
+                    <tr>
+                        <td class="mono">
+                            <a href="/abonelikler/@subscription.Id" title="@subscription.Id">
+                                @Fmt.ShortId(subscription.Id)
+                            </a>
+                        </td>
+                        <td>@subscription.CustomerRef</td>
+                        <td>@PlanName(subscription.PlanId)</td>
+                        <td>
+                            <span class="badge @StatusClass(subscription.Status)">
+                                @Fmt.SubscriptionStatus(subscription.Status)
+                            </span>
+                            @if (subscription.CancelAtPeriodEnd)
+                            {
+                                <div class="hint">dönem sonunda iptal</div>
+                            }
+                        </td>
+                        <td class="mono">@Fmt.Date(subscription.CurrentPeriodEnd)</td>
+                        <td>
+                            @if (subscription.NeedsCardUpdate)
+                            {
+                                <span class="badge warn">Kart güncellenmeli</span>
+                            }
+                            else
+                            {
+                                <span class="mono id-cell" title="@subscription.CardToken">@subscription.CardToken</span>
+                            }
+                        </td>
+                        <td class="row-actions">
+                            @if (_canWrite && subscription.Status != "cancelled")
+                            {
+                                @if (!subscription.CancelAtPeriodEnd)
+                                {
+                                    <form method="post" action="/abonelikler/@subscription.Id/iptal">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="atPeriodEnd" value="true" />
+                                        <button type="submit" class="link">Dönem sonunda iptal</button>
+                                    </form>
+                                }
+                                <a href="/abonelikler/@subscription.Id"
+                                   title="Geri alınamaz — onay detay sayfasında istenir">Hemen iptal…</a>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<h2>Planlar</h2>
+@if (_plans.Count == 0)
+{
+    <p class="empty">Plan yok — abonelik başlatmak için önce bir plan tanımlayın.</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Plan</th>
+                    <th class="num">Tutar</th>
+                    <th>Periyot</th>
+                    <th>Deneme</th>
+                    <th class="num">Abone</th>
+                    <th>Durum</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var plan in _plans)
+                {
+                    <tr>
+                        <td>
+                            @plan.Name
+                            <div class="hint mono">@plan.Id</div>
+                        </td>
+                        <td class="num mono">@Fmt.Money(plan.AmountMinor, plan.Currency)</td>
+                        <td>@Fmt.Interval(plan.Interval, plan.IntervalCount)</td>
+                        <td>@(plan.TrialDays > 0 ? $"{plan.TrialDays} gün" : "—")</td>
+                        <td class="num">@_allSubscriptions.Count(s => s.PlanId == plan.Id)</td>
+                        <td>
+                            <span class="badge @(plan.Active ? "ok" : "muted")">
+                                @(plan.Active ? "Aktif" : "Kapalı")
+                            </span>
+                        </td>
+                        <td>
+                            @if (_canManagePlans)
+                            {
+                                <form method="post" action="/abonelikler/plan/@plan.Id/durum">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="active" value="@(plan.Active ? "false" : "true")" />
+                                    <button type="submit" class="link @(plan.Active ? "danger" : "")">
+                                        @(plan.Active ? "Kapat" : "Aç")
+                                    </button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_canManagePlans)
+{
+    <h3>Yeni plan</h3>
+    <form method="post" action="/abonelikler/plan" class="filters">
+        <AntiforgeryToken />
+        <label>
+            Ad
+            <input type="text" name="name" required maxlength="200" placeholder="Örn. Kurumsal Aylık" />
+        </label>
+        <label>
+            Tutar (₺)
+            <input type="text" name="amountLira" required inputmode="decimal" placeholder="299,90" />
+        </label>
+        <label>
+            Periyot
+            <select name="interval">
+                <option value="month" selected>Ay</option>
+                <option value="year">Yıl</option>
+                <option value="week">Hafta</option>
+                <option value="day">Gün</option>
+            </select>
+        </label>
+        <label>
+            Kaç periyotta bir
+            <input type="number" name="intervalCount" value="1" min="1" max="24" />
+        </label>
+        <label>
+            Deneme (gün)
+            <input type="number" name="trialDays" value="0" min="0" max="365" />
+        </label>
+        <button type="submit" class="primary">Plan oluştur</button>
+    </form>
+    <p class="hint">
+        Plan tutarı sonradan DEĞİŞTİRİLEMEZ — mevcut abonelerin fiyatını sessizce
+        yükseltmemek için. Zam yeni plan açıp abonelikleri taşımakla yapılır.
+    </p>
+}
+
+@code {
+    private static readonly string[] StatusFilters =
+        ["trialing", "active", "past_due", "paused", "unpaid", "cancelled"];
+
+    private IReadOnlyList<SubscriptionDto> _subscriptions = [];
+    private IReadOnlyList<SubscriptionDto> _allSubscriptions = [];
+    private IReadOnlyList<InvoiceDto> _dunning = [];
+    private IReadOnlyList<PlanDto> _plans = [];
+
+    private bool _canWrite;
+    private bool _canManagePlans;
+
+    [SupplyParameterFromQuery(Name = "durum")]
+    private string? Durum { get; set; }
+
+    [SupplyParameterFromQuery(Name = "musteri")]
+    private string? Musteri { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private bool HasFilter
+        => !string.IsNullOrWhiteSpace(Musteri) || !string.IsNullOrEmpty(Durum);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canWrite = Session.HasRank(TenantRole.Operations);
+        _canManagePlans = Session.HasRank(TenantRole.Admin);
+
+        _allSubscriptions = await Dispatcher.Ask(new ListSubscriptionsQuery(null, null));
+
+        _subscriptions = HasFilter
+            ? await Dispatcher.Ask(new ListSubscriptionsQuery(
+                string.IsNullOrWhiteSpace(Musteri) ? null : Musteri.Trim(),
+                string.IsNullOrEmpty(Durum) ? null : Durum))
+            : _allSubscriptions;
+
+        _plans = await Dispatcher.Ask(new ListPlansQuery());
+
+        var invoices = await Dispatcher.Ask(new ListInvoicesQuery(null));
+        _dunning = invoices.Where(i => i.Status == "retrying").ToList();
+    }
+
+    private string PlanName(string planId)
+        => _plans.FirstOrDefault(p => p.Id == planId)?.Name ?? planId;
+
+    private static string StatusClass(string status) => status switch
+    {
+        "active" => "ok",
+        "trialing" => "info",
+        "past_due" => "warn",
+        "unpaid" => "err",
+        _ => "muted",
+    };
+}

@@ -1,0 +1,33 @@
+@using Poyra.Modules.Tenancy.Contracts
+
+<footer>
+    <span class="secure">
+        <svg width="12" height="14" viewBox="0 0 12 14" fill="none" aria-hidden="true">
+            <rect x="1" y="6" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M3.5 6V4.5a2.5 2.5 0 0 1 5 0V6" stroke="currentColor" stroke-width="1.4"/>
+        </svg>
+        Ödeme, bankanızın güvenli sayfasında tamamlanır.
+    </span>
+
+    @if (Branding is { } brand && (brand.SupportEmail is { Length: > 0 } || brand.SupportPhone is { Length: > 0 }))
+    {
+        <span class="support">
+            Sorun mu var?
+            @if (brand.SupportPhone is { Length: > 0 } phone)
+            {
+                <a href="tel:@phone.Replace(" ", "")">@phone</a>
+            }
+            @if (brand.SupportEmail is { Length: > 0 } email)
+            {
+                <a href="mailto:@email">@email</a>
+            }
+        </span>
+    }
+
+    <span class="brand-mini"><span class="hub" aria-hidden="true"></span> poyra</span>
+</footer>
+
+@code {
+    [Parameter]
+    public CheckoutBranding? Branding { get; set; }
+}

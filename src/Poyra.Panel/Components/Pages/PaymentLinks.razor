@@ -1,0 +1,174 @@
+@page "/baglantilar-odeme"
+@attribute [Authorize]
+@using Poyra.Modules.PaymentLinks.Features
+@inject IDispatcher Dispatcher
+
+<PageTitle>Ödeme Linkleri — Poyra</PageTitle>
+
+<h1>Ödeme Linkleri</h1>
+<p class="lead">
+    Kendi ödeme sayfanızı yazmadan tahsilat yapın: linki SMS, e-posta veya QR ile
+    paylaşın; müşteri kart bilgisini bankanın 3D sayfasında girer.
+</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">
+        @sonucMesaj
+        @if (SonucUrl is { Length: > 0 } createdUrl)
+        {
+            <button type="button" class="link" data-url="@createdUrl"
+                    onclick="navigator.clipboard.writeText(this.dataset.url).then(() => this.textContent = 'Kopyalandı ✓')">
+                Kopyala
+            </button>
+        }
+    </div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+<h2>Yeni link</h2>
+<form method="post" action="/baglantilar-odeme/olustur" class="filters create-link">
+    <AntiforgeryToken />
+    <label>
+        Açıklama
+        <input type="text" name="description" maxlength="300" required
+               placeholder="Örn. Danışmanlık bedeli" />
+    </label>
+    <label>
+        Tutar (₺)
+        <input type="number" name="amountLira" step="0.01" min="0" placeholder="boş = müşteri girsin" />
+    </label>
+    <label>
+        Azami taksit
+        <select name="maxInstallments">
+            @foreach (var count in new[] { 1, 2, 3, 6, 9, 12 })
+            {
+                <option value="@count">@(count == 1 ? "Tek çekim" : count + " taksit")</option>
+            }
+        </select>
+    </label>
+    <label>
+        Kullanım sınırı (0 = sınırsız)
+        <input type="number" name="maxUsage" min="0" value="0" />
+    </label>
+    <label>
+        Son geçerlilik
+        <input type="date" name="expiresOn" />
+    </label>
+    <button type="submit" class="primary">Link oluştur</button>
+</form>
+
+<h2>Linkler</h2>
+@if (_links.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">Henüz ödeme linki yok</p>
+        <p class="es-hint">
+            Yukarıdaki formdan ilk linkinizi oluşturun; SMS, e-posta veya QR ile paylaşıp
+            tek satır kod yazmadan tahsilat yapın.
+        </p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Açıklama</th>
+                    <th class="num">Tutar</th>
+                    <th class="hide-narrow">Taksit</th>
+                    <th>Link</th>
+                    <th class="hide-narrow">Kullanım</th>
+                    <th>Durum</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var link in _links)
+                {
+                    <tr>
+                        <td>
+                            @link.Description
+                            @* DOM'da tam kimlik: görselde üç nokta, kopyalama tam ID alır *@
+                            <div class="hint"><span class="mono id-cell" title="@link.Id">@link.Id</span></div>
+                        </td>
+                        <td class="num mono">
+                            @(link.AmountMinor is { } amount ? Fmt.Money(amount, link.Currency) : "Açık tutar")
+                        </td>
+                        <td class="hide-narrow">@(link.MaxInstallments == 1 ? "Tek çekim" : link.MaxInstallments + " taksite kadar")</td>
+                        <td>
+                            <a class="mono link-url" href="@link.Url" target="_blank" rel="noopener">@link.Url</a>
+                            <button type="button" class="link" data-url="@link.Url"
+                                    onclick="navigator.clipboard.writeText(this.dataset.url).then(() => this.textContent = 'Kopyalandı ✓')">
+                                Kopyala
+                            </button>
+                            <div class="hint">
+                                <a href="/baglantilar-odeme/@link.Id/qr.svg" target="_blank" rel="noopener">
+                                    QR kodu
+                                </a>
+                                ·
+                                <a href="/baglantilar-odeme/@link.Id/karekod.svg" target="_blank" rel="noopener">
+                                    TR Karekod
+                                </a>
+                            </div>
+                        </td>
+                        <td class="mono hide-narrow">
+                            @link.SuccessCount@(link.MaxUsage > 0 ? " / " + link.MaxUsage : "")
+                            @if (link.ExpiresAt is { } expiry)
+                            {
+                                <div class="hint">@Fmt.Date(expiry)'e kadar</div>
+                            }
+                        </td>
+                        <td>
+                            <span class="badge @(link.Status == "active" ? "ok" : "muted")">
+                                @(link.Status == "active" ? "Açık" : "Kapalı")
+                            </span>
+                        </td>
+                        <td>
+                            @if (link.Status == "active")
+                            {
+                                @* Kapatma geri alınmaz — paylaşılmış link ölür; tek tık yeterli değil *@
+                                <form method="post" action="/baglantilar-odeme/@link.Id/kapat">
+                                    <AntiforgeryToken />
+                                    <label class="check">
+                                        <input type="checkbox" name="onay" value="1" required />
+                                        Linkin kapanacağını anladım
+                                    </label>
+                                    <button type="submit" class="link danger">Kapat</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<PaymentLinkDto> _links = [];
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private string? SonucUrl
+    {
+        get
+        {
+            if (Sonuc is not { Length: > 0 } text)
+                return null;
+            var start = text.IndexOf("http", StringComparison.Ordinal);
+            return start >= 0 ? text[start..].TrimEnd('.', ' ') : null;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+        => _links = await Dispatcher.Ask(new ListPaymentLinksQuery());
+}

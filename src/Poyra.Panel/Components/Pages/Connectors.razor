@@ -1,0 +1,246 @@
+@page "/baglantilar"
+@attribute [Authorize]
+@using Poyra.Modules.Connectors.Features
+@inject IDispatcher Dispatcher
+
+<PageTitle>POS Bağlantıları — Poyra</PageTitle>
+
+<h1>POS Bağlantıları</h1>
+<p class="lead">
+    Banka ve ödeme kuruluşu sanal POS hesapları. Kimlik bilgileri şifreli saklanır ve
+    <strong>geri okunamaz</strong>; değiştirmek için yenisini yazarsınız.
+</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+@if (_accounts.Count == 0)
+{
+    <p class="empty">Bağlantı hesabı yok — aşağıdan ilk POS'unuzu ekleyin.</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Etiket</th>
+                    <th>Konnektör</th>
+                    <th class="num" title="Küçük sayı önce denenir">Öncelik</th>
+                    <th>Mod</th>
+                    <th>Durum</th>
+                    <th>Sağlık</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var account in _accounts)
+                {
+                    <tr>
+                        <td>
+                            @account.Label
+                            <div class="hint">rota kurallarında bu etiketle anılır</div>
+                        </td>
+                        <td class="mono">@account.ConnectorKey</td>
+                        <td class="num">@account.Priority</td>
+                        <td>@(account.TestMode ? "Test" : "Canlı")</td>
+                        <td>
+                            <span class="badge @(account.Status == "active" ? "ok" : "muted")">
+                                @(account.Status == "active" ? "Aktif" : "Devre dışı")
+                            </span>
+                        </td>
+                        <td><span class="badge @Fmt.HealthClass(account.Health)">@Fmt.Health(account.Health)</span></td>
+                        <td class="row-actions">
+                            <form method="post" action="/baglantilar/@account.Id/test">
+                                <AntiforgeryToken />
+                                <button type="submit" class="link">Test et</button>
+                            </form>
+                            @if (account.Status == "active")
+                            {
+                                @* Kapatma tek tıkla olmaz: link onay bloğunu açar, POST orada. *@
+                                <a class="link danger" href="/baglantilar?onay=@account.Id">Devre dışı bırak</a>
+                            }
+                            else
+                            {
+                                <form method="post" action="/baglantilar/@account.Id/durum">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="status" value="active" />
+                                    <button type="submit" class="link">Aç</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                    @if (Onay == account.Id && account.Status == "active")
+                    {
+                        <tr>
+                            <td colspan="7">
+                                <div class="alert warn" role="status">
+                                    <strong>'@account.Label'</strong> devre dışı bırakılacak — bu hesabı
+                                    kapatırsanız yeni işlemler bu POS'a gitmez; rota motoru onu atlar.
+                                    <div class="row-actions">
+                                        <form method="post" action="/baglantilar/@account.Id/durum">
+                                            <AntiforgeryToken />
+                                            <input type="hidden" name="status" value="disabled" />
+                                            <button type="submit" class="link danger">
+                                                Onayla — devre dışı bırak
+                                            </button>
+                                        </form>
+                                        <a class="link" href="/baglantilar">Vazgeç</a>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <h2>Ayar / anahtar yenileme</h2>
+    <p class="muted">
+        Banka anahtarınız değiştiyse hesabı silmeyin — anahtarı yenileyin. Hesap kimliği sabit
+        kalır, geçmiş işlemler bağlı durmaya devam eder. Kaydedince bağlantı hemen sınanır.
+    </p>
+    <div class="accounts-edit">
+        @foreach (var account in _accounts)
+        {
+            var fields = FieldsFor(account.ConnectorKey);
+            <details>
+                <summary>@account.Label <span class="mono">@account.ConnectorKey</span></summary>
+
+                <form method="post" action="/baglantilar/@account.Id/ayarlar" class="filters">
+                    <AntiforgeryToken />
+                    <label>
+                        Etiket
+                        <input type="text" name="label" value="@account.Label" maxlength="100" />
+                    </label>
+                    <label>
+                        Öncelik
+                        <input type="number" name="priority" value="@account.Priority" min="1" max="1000" />
+                        <span class="hint">Küçük sayı önce denenir</span>
+                    </label>
+                    <label class="check">
+                        <input type="checkbox" name="testMode" value="true" checked="@account.TestMode" />
+                        Test modu
+                    </label>
+                    <button type="submit" class="ghost">Ayarları kaydet</button>
+                </form>
+
+                @if (fields.Count > 0)
+                {
+                    <form method="post" action="/baglantilar/@account.Id/anahtar" class="filters">
+                        <AntiforgeryToken />
+                        @foreach (var field in fields)
+                        {
+                            <label>
+                                @field.Label @(field.Required ? "" : "(isteğe bağlı)")
+                                <input type="@(field.Secret ? "password" : "text")" name="cred_@field.Name"
+                                       autocomplete="off" required="@field.Required" />
+                            </label>
+                        }
+                        <button type="submit" class="ghost">Anahtarları yenile</button>
+                    </form>
+                }
+            </details>
+        }
+    </div>
+}
+
+<h2>Yeni bağlantı hesabı</h2>
+<form method="get" class="filters">
+    <label>
+        Konnektör
+        <select name="konnektor" onchange="this.form.submit()">
+            <option value="">Seçin…</option>
+            @foreach (var entry in _catalog)
+            {
+                <option value="@entry.Key" selected="@(Konnektor == entry.Key)">@entry.DisplayName</option>
+            }
+        </select>
+    </label>
+    <noscript><button type="submit" class="ghost">Alanları getir</button></noscript>
+</form>
+
+@if (_selected is { } selected)
+{
+    <form method="post" action="/baglantilar/ekle" class="filters create-account">
+        <AntiforgeryToken />
+        <input type="hidden" name="connectorKey" value="@selected.Key" />
+        <label>
+            Etiket
+            <input type="text" name="label" required maxlength="100"
+                   placeholder="@("Örn. " + selected.DisplayName + " – Ana POS")" />
+        </label>
+        <label>
+            Öncelik
+            <input type="number" name="priority" value="100" min="1" max="1000" />
+            <span class="hint">Küçük sayı önce denenir</span>
+        </label>
+
+        @foreach (var field in selected.CredentialFields)
+        {
+            <label>
+                @field.Label @(field.Required ? "" : "(isteğe bağlı)")
+                <input type="@(field.Secret ? "password" : "text")" name="cred_@field.Name"
+                       autocomplete="off" required="@field.Required" />
+            </label>
+        }
+
+        <label class="check">
+            <input type="checkbox" name="testMode" value="true" checked />
+            Test modu (banka test ortamı)
+        </label>
+        <button type="submit" class="primary">Hesabı ekle</button>
+    </form>
+
+    @if (selected.Notes is { Length: > 0 } notes)
+    {
+        <p class="hint">@notes</p>
+    }
+    <p class="hint">
+        Destek:
+        <span class="badge @(selected.SupportsInstallments ? "ok" : "muted")">
+            @(selected.SupportsInstallments ? "Taksit" : "Taksit yok")
+        </span>
+        <span class="badge @(selected.SupportsVoid ? "ok" : "muted")">
+            @(selected.SupportsVoid ? "İptal" : "İptal yok")
+        </span>
+        <span class="badge @(selected.SupportsRefund ? "ok" : "muted")">
+            @(selected.SupportsRefund ? "İade" : "İade yok")
+        </span>
+    </p>
+}
+
+@code {
+    private IReadOnlyList<ConnectorAccountResponse> _accounts = [];
+    private IReadOnlyList<CatalogEntryDto> _catalog = [];
+    private CatalogEntryDto? _selected;
+
+    [SupplyParameterFromQuery(Name = "konnektor")]
+    private string? Konnektor { get; set; }
+
+    [SupplyParameterFromQuery(Name = "onay")]
+    private Guid? Onay { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _accounts = await Dispatcher.Ask(new ListConnectorAccountsQuery());
+        _catalog = await Dispatcher.Ask(new ListCatalogQuery());
+        _selected = _catalog.FirstOrDefault(c => c.Key == Konnektor);
+    }
+
+    private IReadOnlyList<CatalogFieldDto> FieldsFor(string key)
+        => _catalog.FirstOrDefault(c => c.Key == key)?.CredentialFields ?? [];
+}

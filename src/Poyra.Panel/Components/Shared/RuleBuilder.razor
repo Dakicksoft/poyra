@@ -1,0 +1,336 @@
+@using Poyra.Panel.Routing
+
+<div class="rule-builder">
+    <div class="builder-row">
+        <label class="inline-field">
+            Kural eşleşmezse
+            <select value="@Model.Strategy" @onchange="e => Set(() => Model.Strategy = Value(e))">
+                @foreach (var (value, label) in RuleBuilderModel.Strategies)
+                {
+                    <option value="@value">@label</option>
+                }
+            </select>
+        </label>
+
+        <label class="inline-field">
+            Deneme hakkı
+            <input type="number" min="1" max="5" value="@Model.MaxAttempts"
+                   @onchange="e => Set(() => Model.MaxAttempts = ToInt(e, 2))" />
+        </label>
+
+        <label class="check">
+            <input type="checkbox" checked="@Model.SkipUnhealthy"
+                   @onchange="e => Set(() => Model.SkipUnhealthy = ToBool(e))" />
+            Erişilemeyen POS'ları atla
+        </label>
+    </div>
+
+    @if (Model.Strategy == "balanced" || Model.Rules.Any(r => r.Strategy == "balanced"))
+    {
+        <div class="builder-row weights">
+            <span class="hint">Dengeli strateji ağırlıkları:</span>
+            <label class="inline-field">
+                Maliyet
+                <input type="number" step="0.1" min="0" value="@Model.CostWeight"
+                       @onchange="e => Set(() => Model.CostWeight = ToDouble(e, 1))" />
+            </label>
+            <label class="inline-field">
+                Başarı
+                <input type="number" step="0.1" min="0" value="@Model.SuccessWeight"
+                       @onchange="e => Set(() => Model.SuccessWeight = ToDouble(e, 1))" />
+            </label>
+            <label class="inline-field">
+                Hız
+                <input type="number" step="0.1" min="0" value="@Model.LatencyWeight"
+                       @onchange="e => Set(() => Model.LatencyWeight = ToDouble(e, 0.5))" />
+            </label>
+        </div>
+    }
+
+    @for (var i = 0; i < Model.Rules.Count; i++)
+    {
+        var index = i;
+        var rule = Model.Rules[index];
+
+        <div class="rule-block">
+            <div class="block-head">
+                <span class="order">@(index + 1).</span>
+                <input type="text" class="rule-name" placeholder="Kural adı (ör. yüksek tutar)"
+                       value="@rule.Name" @onchange="e => Set(() => rule.Name = Value(e))" />
+                <div class="block-actions">
+                    <button type="button" class="link" disabled="@(index == 0)"
+                            @onclick="() => Move(index, -1)" title="Yukarı"
+                            aria-label="Kuralı yukarı taşı">↑</button>
+                    <button type="button" class="link" disabled="@(index == Model.Rules.Count - 1)"
+                            @onclick="() => Move(index, 1)" title="Aşağı"
+                            aria-label="Kuralı aşağı taşı">↓</button>
+                    <button type="button" class="link danger" @onclick="() => RemoveRule(index)"
+                            aria-label="Kuralı sil">Sil</button>
+                </div>
+            </div>
+
+            <div class="block-body">
+                <div class="conditions">
+                    @if (rule.Conditions.Count == 0)
+                    {
+                        <p class="hint">Koşul yok — bu kural <strong>her işleme</strong> uyar.</p>
+                    }
+
+                    @for (var c = 0; c < rule.Conditions.Count; c++)
+                    {
+                        var conditionIndex = c;
+                        var condition = rule.Conditions[conditionIndex];
+                        var definition = condition.Definition;
+
+                        <div class="condition-row">
+                            <span class="joiner">
+                                @if (conditionIndex == 0)
+                                {
+                                    <text>Eğer</text>
+                                }
+                                else
+                                {
+                                    <select value="@rule.Join" aria-label="Koşul bağlacı"
+                                            @onchange="e => Set(() => rule.Join = Value(e))">
+                                        <option value="all">ve</option>
+                                        <option value="any">veya</option>
+                                    </select>
+                                }
+                            </span>
+
+                            <select value="@condition.Fact" aria-label="Koşul alanı"
+                                    @onchange="e => Set(() => ChangeFact(condition, Value(e)))">
+                                @foreach (var fact in RuleFacts.All)
+                                {
+                                    <option value="@fact.Fact">@fact.Label</option>
+                                }
+                            </select>
+
+                            <select value="@condition.Op" aria-label="Operatör"
+                                    @onchange="e => Set(() => condition.Op = Value(e))">
+                                @foreach (var (op, label) in RuleFacts.OpsFor(definition.Kind))
+                                {
+                                    <option value="@op">@label</option>
+                                }
+                            </select>
+
+                            @if (definition.Kind == FactKind.Boolean)
+                            {
+                                <select value="@condition.Value" aria-label="Değer"
+                                        @onchange="e => Set(() => condition.Value = Value(e))">
+                                    <option value="true">evet</option>
+                                    <option value="false">hayır</option>
+                                </select>
+                            }
+                            else if (definition.Choices is { } choices && condition.Op != "in"
+                                     && condition.Op != "starts_with")
+                            {
+                                <select value="@condition.Value" aria-label="Değer"
+                                        @onchange="e => Set(() => condition.Value = Value(e))">
+                                    <option value="">seçin…</option>
+                                    @foreach (var (value, label) in choices)
+                                    {
+                                        <option value="@value">@label</option>
+                                    }
+                                </select>
+                            }
+                            else
+                            {
+                                <input type="text" value="@condition.Value" aria-label="Değer"
+                                       placeholder="@Placeholder(definition, condition.Op)"
+                                       @onchange="e => Set(() => condition.Value = Value(e))" />
+                            }
+
+                            @if (definition.Kind == FactKind.Money)
+                            {
+                                <span class="unit">₺</span>
+                            }
+
+                            <button type="button" class="link danger" aria-label="Koşulu sil"
+                                    @onclick="() => RemoveCondition(rule, conditionIndex)">×</button>
+                        </div>
+
+                        @if (definition.Hint is { Length: > 0 } hint && conditionIndex == 0)
+                        {
+                            <p class="hint indent">@hint</p>
+                        }
+                    }
+
+                    <button type="button" class="link" @onclick="() => AddCondition(rule)">+ koşul ekle</button>
+                </div>
+
+                <div class="then">
+                    <span class="label">O zaman</span>
+
+                    <div class="account-picks">
+                        @foreach (var account in Accounts)
+                        {
+                            <label class="check">
+                                <input type="checkbox" checked="@rule.Route.Contains(account)"
+                                       @onchange="e => Set(() => Toggle(rule.Route, account, ToBool(e)))" />
+                                @account
+                            </label>
+                        }
+                        @if (Accounts.Count == 0)
+                        {
+                            <span class="hint">Önce bağlantı hesabı ekleyin.</span>
+                        }
+                    </div>
+
+                    <label class="inline-field">
+                        Seçim yöntemi
+                        <select value="@rule.Strategy" @onchange="e => Set(() => rule.Strategy = Value(e))">
+                            <option value="">(varsayılan)</option>
+                            @foreach (var (value, label) in RuleBuilderModel.Strategies)
+                            {
+                                <option value="@value">@label</option>
+                            }
+                        </select>
+                    </label>
+
+                    <label class="inline-field grow">
+                        Gerekçe (panelde görünür)
+                        <input type="text" value="@rule.Reason" placeholder="ör. yüksek tutar → İş POS"
+                               @onchange="e => Set(() => rule.Reason = Value(e))" />
+                    </label>
+                </div>
+            </div>
+        </div>
+    }
+
+    <button type="button" class="secondary" @onclick="AddRule">+ Kural ekle</button>
+
+    <h3>Hacim bölüşümü <span class="hint">(kural eşleşmezse yüzdeyle dağıt)</span></h3>
+    @foreach (var account in Accounts)
+    {
+        var row = Model.Split.FirstOrDefault(s => s.Account == account);
+        <div class="split-row">
+            <span class="name">@account</span>
+            <input type="number" min="0" max="100" value="@(row?.Percent ?? 0)"
+                   @onchange="e => Set(() => SetSplit(account, ToInt(e, 0)))" />
+            <span class="unit">%</span>
+        </div>
+    }
+    @if (Model.Split.Sum(s => s.Percent) is var total && total is > 0 and not 100)
+    {
+        <p class="hint warn-text">Toplam %@total — motor yüzdeleri orantılar, ama %100 yazmak niyeti nettir.</p>
+    }
+
+    <h3>Son çare (fallback)</h3>
+    <div class="account-picks">
+        @foreach (var account in Accounts)
+        {
+            <label class="check">
+                <input type="checkbox" checked="@Model.Fallback.Contains(account)"
+                       @onchange="e => Set(() => Toggle(Model.Fallback, account, ToBool(e)))" />
+                @account
+            </label>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RuleBuilderModel Model { get; set; } = new();
+
+    [Parameter]
+    public IReadOnlyList<string> Accounts { get; set; } = [];
+
+    [Parameter]
+    public EventCallback Changed { get; set; }
+
+    private async Task Set(Action mutate)
+    {
+        mutate();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task AddRule()
+    {
+        Model.Rules.Add(new RuleBlock { Name = $"kural {Model.Rules.Count + 1}" });
+        await Changed.InvokeAsync();
+    }
+
+    private async Task RemoveRule(int index)
+    {
+        Model.Rules.RemoveAt(index);
+        await Changed.InvokeAsync();
+    }
+
+    private async Task Move(int index, int delta)
+    {
+        var target = index + delta;
+        if (target < 0 || target >= Model.Rules.Count)
+            return;
+
+        (Model.Rules[index], Model.Rules[target]) = (Model.Rules[target], Model.Rules[index]);
+        await Changed.InvokeAsync();
+    }
+
+    private async Task AddCondition(RuleBlock rule)
+    {
+        rule.Conditions.Add(new ConditionRow());
+        await Changed.InvokeAsync();
+    }
+
+    private async Task RemoveCondition(RuleBlock rule, int index)
+    {
+        rule.Conditions.RemoveAt(index);
+        await Changed.InvokeAsync();
+    }
+
+    private static void ChangeFact(ConditionRow condition, string fact)
+    {
+        condition.Fact = fact;
+        var ops = RuleFacts.OpsFor(condition.Definition.Kind);
+        if (ops.All(o => o.Op != condition.Op))
+            condition.Op = ops[0].Op;
+        condition.Value = condition.Definition.Kind == FactKind.Boolean ? "true" : "";
+    }
+
+    private static void Toggle(List<string> list, string value, bool on)
+    {
+        if (on && !list.Contains(value))
+            list.Add(value);
+        else if (!on)
+            list.Remove(value);
+    }
+
+    private void SetSplit(string account, int percent)
+    {
+        var row = Model.Split.FirstOrDefault(s => s.Account == account);
+        if (percent <= 0)
+        {
+            if (row is not null)
+                Model.Split.Remove(row);
+            return;
+        }
+
+        if (row is null)
+            Model.Split.Add(new SplitRow { Account = account, Percent = percent });
+        else
+            row.Percent = percent;
+    }
+
+    private static string Placeholder(FactDefinition definition, string op) => op switch
+    {
+        "in" => "virgülle ayırın: a, b, c",
+        _ => definition.Kind switch
+        {
+            FactKind.Money => "1.500",
+            FactKind.Number => "3",
+            _ => "",
+        },
+    };
+
+    private static string Value(ChangeEventArgs e) => e.Value?.ToString() ?? "";
+
+    private static bool ToBool(ChangeEventArgs e) => e.Value is bool b && b;
+
+    private static int ToInt(ChangeEventArgs e, int fallback)
+        => int.TryParse(Value(e), out var n) ? n : fallback;
+
+    private static double ToDouble(ChangeEventArgs e, double fallback)
+        => double.TryParse(Value(e), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : fallback;
+}

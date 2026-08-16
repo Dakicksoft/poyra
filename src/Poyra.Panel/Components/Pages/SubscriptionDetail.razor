@@ -1,0 +1,234 @@
+@page "/abonelikler/{Id}"
+@attribute [Authorize]
+@using Poyra.Modules.Subscriptions.Features
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>Abonelik @Id — Poyra</PageTitle>
+
+<p class="crumb"><a href="/abonelikler">← Abonelikler</a></p>
+
+@if (_subscription is null)
+{
+    <h1>Abonelik bulunamadı</h1>
+    <p class="empty">Bu kimlikle bir abonelik yok: <span class="mono">@Id</span></p>
+}
+else
+{
+    <h1>@_subscription.CustomerRef</h1>
+    <p class="lead mono">@_subscription.Id</p>
+
+    @if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+    {
+        <div class="alert ok" role="status">@sonucMesaj</div>
+    }
+    @if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+    {
+        <div class="alert err" role="alert">@hataMesaj</div>
+    }
+
+    @if (_subscription.NeedsCardUpdate)
+    {
+        <div class="alert warn" role="alert">
+            Kart çalışmıyor — tahsilat duruyor. Müşteriden yeni kart alınıp Kasa'da
+            saklandıktan sonra buradaki token güncellenir; bekleyen fatura anında denenir.
+        </div>
+    }
+
+    @if (_retrying is not null)
+    {
+        <div class="alert warn" role="alert">
+            Son fatura @(_retrying.AttemptCount). denemede —
+            son hata: @(_retrying.LastErrorCode is { Length: > 0 } err ? Fmt.Error(err) : "—"),
+            sıradaki deneme: @(_retrying.NextRetryAt is { } next ? Fmt.Date(next) : "—")
+        </div>
+    }
+
+    <div class="summary">
+        <div>
+            <span class="label">Durum</span>
+            <span class="badge @StatusClass(_subscription.Status)">
+                @Fmt.SubscriptionStatus(_subscription.Status)
+            </span>
+            @if (_subscription.CancelAtPeriodEnd)
+            {
+                <div class="hint">dönem sonunda iptal edilecek</div>
+            }
+        </div>
+        <div>
+            <span class="label">Plan</span>
+            @(_plan?.Name ?? _subscription.PlanId)
+            @if (_plan is not null)
+            {
+                <div class="hint">@Fmt.Money(_plan.AmountMinor, _plan.Currency) — @Fmt.Interval(_plan.Interval, _plan.IntervalCount)</div>
+            }
+        </div>
+        <div>
+            <span class="label">Dönem başı</span>
+            <span class="mono">@Fmt.Date(_subscription.CurrentPeriodStart)</span>
+        </div>
+        <div>
+            <span class="label">Dönem sonu</span>
+            <span class="mono">@Fmt.Date(_subscription.CurrentPeriodEnd)</span>
+        </div>
+        <div>
+            <span class="label">Kart</span>
+            <span class="mono">@_subscription.CardToken</span>
+        </div>
+    </div>
+
+    @if (_canWrite)
+    {
+        <h2>İşlemler</h2>
+        <form method="post" action="/abonelikler/@_subscription.Id/kart" class="filters">
+            <AntiforgeryToken />
+            <label>
+                Yeni kart token'ı (Kasa)
+                <input type="text" name="cardToken" required placeholder="tok_…" pattern="tok_.+" />
+            </label>
+            <button type="submit" class="primary">Kartı güncelle</button>
+        </form>
+
+        @if (_subscription.Status != "cancelled")
+        {
+            <div class="actions">
+                <form method="post" action="/abonelikler/@_subscription.Id/iptal">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="atPeriodEnd" value="true" />
+                    <button type="submit" class="secondary">Dönem sonunda iptal et</button>
+                </form>
+                <form method="post" action="/abonelikler/@_subscription.Id/iptal">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="atPeriodEnd" value="false" />
+                    <label class="check">
+                        <input type="checkbox" name="onay" value="1" required />
+                        Tahsilat anında durur ve geri alınamaz, anladım
+                    </label>
+                    <button type="submit" class="secondary danger">Hemen iptal — tahsilat anında durur</button>
+                </form>
+            </div>
+        }
+
+        <p class="hint">
+            Kart token'ı panelde ÜRETİLMEZ: kart numarası panele hiç girilmez, Kasa'ya
+            (<span class="mono">POST /v1/vault/cards</span>) doğrudan müşteri tarafından verilir.
+        </p>
+    }
+
+    <h2>Fatura geçmişi</h2>
+    @if (_invoices.Count == 0)
+    {
+        <p class="empty">Henüz fatura kesilmedi.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Dönem</th>
+                        <th class="num">Tutar</th>
+                        <th>Durum</th>
+                        <th class="num">Deneme</th>
+                        <th>Ödeme</th>
+                        <th>Not</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var invoice in _invoices)
+                    {
+                        <tr>
+                            <td class="mono">
+                                @Fmt.Date(invoice.PeriodStart)
+                                <div class="hint">→ @Fmt.Date(invoice.PeriodEnd)</div>
+                            </td>
+                            <td class="num mono">@Fmt.Money(invoice.AmountMinor, "TRY")</td>
+                            <td>
+                                <span class="badge @InvoiceClass(invoice.Status)">
+                                    @Fmt.InvoiceStatus(invoice.Status)
+                                </span>
+                            </td>
+                            <td class="num">@invoice.AttemptCount</td>
+                            <td class="mono">
+                                @if (invoice.LastPaymentId is { Length: > 0 } paymentId)
+                                {
+                                    <a href="/odemeler/@paymentId" title="@paymentId">@Fmt.ShortId(paymentId)</a>
+                                }
+                                else
+                                {
+                                    <span class="hint">—</span>
+                                }
+                            </td>
+                            <td>
+                                @if (invoice.LastErrorCode is { Length: > 0 } error)
+                                {
+                                    <span class="badge err">@Fmt.Error(error)</span>
+                                }
+                                @if (invoice.NextRetryAt is { } next)
+                                {
+                                    <div class="hint mono">tekrar: @Fmt.Date(next)</div>
+                                }
+                                @if (invoice.PaidAt is { } paid)
+                                {
+                                    <div class="hint mono">@Fmt.Date(paid)</div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public string Id { get; set; } = "";
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private SubscriptionDto? _subscription;
+    private PlanDto? _plan;
+    private IReadOnlyList<InvoiceDto> _invoices = [];
+    private InvoiceDto? _retrying;
+    private bool _canWrite;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canWrite = Session.HasRank(TenantRole.Operations);
+
+        var all = await Dispatcher.Ask(new ListSubscriptionsQuery(null, null));
+        _subscription = all.FirstOrDefault(s => s.Id == Id);
+        if (_subscription is null)
+            return;
+
+        var plans = await Dispatcher.Ask(new ListPlansQuery());
+        _plan = plans.FirstOrDefault(p => p.Id == _subscription.PlanId);
+        _invoices = (await Dispatcher.Ask(new ListInvoicesQuery(Id)))
+            .OrderByDescending(i => i.PeriodStart).ToList();
+
+        _retrying = _invoices.FirstOrDefault(i => i.Status == "retrying");
+    }
+
+    private static string StatusClass(string status) => status switch
+    {
+        "active" => "ok",
+        "trialing" => "info",
+        "past_due" => "warn",
+        "unpaid" => "err",
+        _ => "muted",
+    };
+
+    private static string InvoiceClass(string status) => status switch
+    {
+        "paid" => "ok",
+        "retrying" => "warn",
+        "abandoned" => "err",
+        _ => "info",
+    };
+}

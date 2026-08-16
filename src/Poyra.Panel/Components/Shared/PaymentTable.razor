@@ -1,0 +1,64 @@
+@using Poyra.Modules.Payments.Features.ListPayments
+
+@if (Items.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">Görüntülenecek ödeme yok</p>
+        <p class="es-hint">
+            Filtre kullanıyorsanız genişletmeyi deneyin. İlk tahsilat için bir
+            <a href="/baglantilar-odeme">ödeme linki</a> oluşturabilir ya da API ile
+            ödeme başlatabilirsiniz.
+        </p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Tarih</th>
+                    <th>Ödeme</th>
+                    <th class="num">Tutar</th>
+                    <th class="hide-narrow">Taksit</th>
+                    <th>POS</th>
+                    <th class="hide-narrow">Kart</th>
+                    <th>Durum</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Items)
+                {
+                    <tr>
+                        <td class="mono">@Fmt.Date(item.CreatedAt)</td>
+                        <td><a href="/odemeler/@item.Id" class="mono id-cell" title="@item.Id">@item.Id</a></td>
+                        <td class="num mono">
+                            @Fmt.Money(item.ChargedAmountMinor ?? item.AmountMinor, item.Currency)
+                            @if (item.ChargedAmountMinor is { } charged && charged != item.AmountMinor)
+                            {
+                                <span class="hint" title="Vade farkı dahil">
+                                    (mal bedeli @Fmt.Money(item.AmountMinor, item.Currency))
+                                </span>
+                            }
+                        </td>
+                        <td class="hide-narrow">@(item.Installments > 1 ? $"{item.Installments}x" : "Tek çekim")</td>
+                        <td>@(item.ConnectorKey ?? "—")</td>
+                        <td class="mono hide-narrow">@(item.MaskedPan ?? "—")</td>
+                        <td>
+                            <span class="badge @Fmt.StatusClass(item.Status)">@Fmt.PaymentStatus(item.Status)</span>
+                            @if (item.LastErrorCode is { Length: > 0 })
+                            {
+                                <div class="hint">@Fmt.Error(item.LastErrorCode)</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<PaymentListItemDto> Items { get; set; } = [];
+}

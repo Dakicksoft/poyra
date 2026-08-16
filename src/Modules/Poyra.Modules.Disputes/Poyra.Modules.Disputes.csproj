@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Poyra.SharedKernel\Poyra.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Poyra.Persistence\Poyra.Persistence.csproj" />
+    <ProjectReference Include="..\Poyra.Modules.Payments\Poyra.Modules.Payments.csproj" />
+    <ProjectReference Include="..\Poyra.Modules.Webhooks\Poyra.Modules.Webhooks.csproj" />
+    <ProjectReference Include="..\Poyra.Modules.Tenancy\Poyra.Modules.Tenancy.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FastEndpoints" />
+    <PackageReference Include="Hangfire.Core" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,22 @@
+@using Poyra.Modules.Tenancy.Contracts
+
+@if (Branding is { } brand)
+{
+    <header class="merchant" style="--marka: @brand.PrimaryColor">
+        @if (brand.LogoUrl is { Length: > 0 } logo)
+        {
+            <img src="@logo" alt="@brand.DisplayName" class="merchant-logo"
+                 onerror="this.hidden=true;this.nextElementSibling.hidden=false" />
+            <span class="merchant-name" hidden>@brand.DisplayName</span>
+        }
+        else
+        {
+            <span class="merchant-name">@brand.DisplayName</span>
+        }
+    </header>
+}
+
+@code {
+    [Parameter]
+    public CheckoutBranding? Branding { get; set; }
+}

@@ -1,0 +1,214 @@
+@page "/guvenlik"
+@attribute [Authorize]
+@using Poyra.Modules.Tenancy.Features.Auth
+@using Poyra.SharedKernel.Tenancy
+@using Poyra.Panel.Security
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+@inject OneTimeSecretStash Stash
+
+<PageTitle>Güvenlik — Poyra</PageTitle>
+
+<h1>Güvenlik</h1>
+<p class="lead">
+    İki adımlı doğrulama (2FA), parolanız ele geçse bile hesabınızı korur:
+    girişte telefonunuzdaki uygulamadan 6 haneli kod istenir.
+</p>
+
+@if (Zorunlu == 1 && _status is { Enabled: false })
+{
+    <div class="alert warn" role="alert">
+        <strong>Kurulum gerekli:</strong> bu işyerinde owner/admin rolleri için iki adımlı
+        doğrulama zorunlu. Aşağıdan birkaç dakikada kurabilirsiniz.
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(Sonuc))
+{
+    <div class="alert ok" role="status">@ResultText(Sonuc)</div>
+}
+@if (!string.IsNullOrEmpty(Hata))
+{
+    <div class="alert err" role="alert">@ErrorText(Hata)</div>
+}
+
+@if (_kurtarmaKodlari is { Count: > 0 })
+{
+    <div class="alert warn" role="alert">
+        <strong>Kurtarma kodlarınız (yalnız şimdi görünür):</strong>
+        <div class="mono secret">@string.Join("   ", _kurtarmaKodlari)</div>
+        Telefonunuzu kaybederseniz giriş için tek yol bunlardır. Her kod bir kez kullanılır —
+        parola kasanıza kaydedin ya da yazdırıp saklayın.
+        <button type="button" class="link"
+                onclick="navigator.clipboard.writeText(this.parentElement.querySelector('.secret').textContent.trim());this.textContent='Kopyalandı ✓'">
+            Kopyala
+        </button>
+    </div>
+}
+
+@if (_status is null)
+{
+    <p class="empty">Durum okunamadı.</p>
+}
+else if (_status.Enabled)
+{
+    <div class="tiles">
+        <div class="tile">
+            <span class="label">İki adımlı doğrulama</span>
+            <span class="value"><span class="badge ok">Açık</span></span>
+            <span class="sub">@(_status.EnabledAt is { } t ? $"kurulum: {Fmt.Date(t)}" : "")</span>
+        </div>
+        <div class="tile @(_status.RecoveryCodesLeft <= 2 ? "warn" : "")">
+            <span class="label">Kurtarma kodu</span>
+            <span class="value">@_status.RecoveryCodesLeft</span>
+            <span class="sub">@(_status.RecoveryCodesLeft <= 2 ? "azaldı — 2FA'yı yeniden kurarak yenileyin" : "kullanılabilir")</span>
+        </div>
+    </div>
+
+    <h2>Kapat</h2>
+    <p class="lead">
+        Kapatmak için mevcut bir uygulama kodu ya da kurtarma kodu gerekir —
+        yalnız oturum yetmez, hesabı ele geçiren kişi 2FA'yı sessizce kapatamasın.
+    </p>
+    <form method="post" action="/guvenlik/2fa/kapat" class="inline-form">
+        <AntiforgeryToken />
+        <input type="text" name="kod" inputmode="numeric" autocomplete="one-time-code"
+               pattern="[0-9]{6}|[0-9]{5}-[0-9]{5}" maxlength="11" required
+               placeholder="6 haneli kod" aria-label="Doğrulama kodu" />
+        <label class="check">
+            <input type="checkbox" name="onay" value="1" required />
+            Hesabım yalnız parolayla korunacak — anladım
+        </label>
+        <button type="submit" class="link danger">2FA'yı kapat</button>
+    </form>
+}
+else if (_pending is not null)
+{
+    <h2>Kurulumu tamamlayın</h2>
+    <ol class="lead">
+        <li>Doğrulama uygulamanızda (Google Authenticator, Authy, 1Password…) yeni hesap ekleyin.</li>
+        <li>QR kodu okutun ya da anahtarı elle girin.</li>
+        <li>Uygulamanın ürettiği 6 haneli kodu aşağıya yazın.</li>
+    </ol>
+
+    <div class="totp-setup">
+        <img class="totp-qr" src="/guvenlik/2fa/qr.png" width="180" height="180"
+             alt="Authenticator kurulum QR kodu" />
+        <div>
+            <p class="hint">QR okutamıyorsanız elle giriş anahtarı:</p>
+            <div class="mono secret">@FormatSecret(_pending.SecretBase32)</div>
+            <p class="hint">Tür: zamana dayalı (TOTP) · 6 hane · 30 saniye</p>
+        </div>
+    </div>
+
+    <form method="post" action="/guvenlik/2fa/onayla" class="inline-form">
+        <AntiforgeryToken />
+        <input type="text" name="kod" inputmode="numeric" autocomplete="one-time-code"
+               pattern="[0-9]{6}" maxlength="6" required placeholder="000000"
+               aria-label="Uygulamadaki 6 haneli kod" />
+        <button type="submit" class="primary">Doğrula ve 2FA'yı aç</button>
+    </form>
+
+    <form method="post" action="/guvenlik/2fa/basla" class="actions">
+        <AntiforgeryToken />
+        <button type="submit" class="link">Yeni anahtar üret (baştan başla)</button>
+    </form>
+}
+else
+{
+    <div class="empty-state">
+        <p class="es-title">İki adımlı doğrulama kapalı</p>
+        <p class="es-hint">
+            Para hareketi, API anahtarları ve ekip yönetimi şu an yalnız parolanızla korunuyor.
+            Kurulum birkaç dakika sürer; tek gereken telefonunuzda bir doğrulama uygulaması.
+        </p>
+        <form method="post" action="/guvenlik/2fa/basla" style="margin-top:.9rem">
+            <AntiforgeryToken />
+            <button type="submit" class="primary">2FA kurulumunu başlat</button>
+        </form>
+    </div>
+}
+
+@if (Session.HasRank(TenantRole.Owner))
+{
+    <h2>İşyeri politikası</h2>
+    <p class="lead">
+        Owner ve admin rolleri için 2FA'yı zorunlu kılabilirsiniz: kurulumu olmayan
+        yetkili kullanıcılar girişte kuruluma yönlendirilir.
+    </p>
+    <form method="post" action="/guvenlik/zorunluluk" class="inline-form">
+        <AntiforgeryToken />
+        @if (_tenantRequires)
+        {
+            <span class="badge ok">Zorunluluk açık</span>
+            <button type="submit" class="ghost">Zorunluluğu kaldır</button>
+        }
+        else
+        {
+            <input type="hidden" name="gerekli" value="1" />
+            <span class="badge muted">Zorunluluk kapalı</span>
+            <button type="submit" class="ghost">Owner/admin için zorunlu kıl</button>
+        }
+    </form>
+}
+
+@code {
+    private TotpStatusDto? _status;
+    private TotpEnrollmentDto? _pending;
+    private bool _tenantRequires;
+    private IReadOnlyList<string>? _kurtarmaKodlari;
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    [SupplyParameterFromQuery(Name = "zorunlu")]
+    private int Zorunlu { get; set; }
+
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (HttpContext?.Request.Cookies[OneTimeSecretStash.CookieName] is { Length: > 0 } key
+            && Stash.Take(key) is { Length: > 0 } joined)
+        {
+            _kurtarmaKodlari = joined.Split('\n');
+            HttpContext.Response.Cookies.Delete(OneTimeSecretStash.CookieName,
+                new CookieOptions { Path = "/guvenlik" });
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _status = await Dispatcher.Ask(new TotpStatusQuery());
+        _pending = _status.PendingSetup ? await Dispatcher.Ask(new PendingTotpEnrollmentQuery()) : null;
+        if (Session.HasRank(TenantRole.Owner) && Session.TenantId is { } tenantId)
+            _tenantRequires = await Dispatcher.Ask(new TenantRequiresTotpQuery(tenantId));
+    }
+
+    private static string FormatSecret(string secret)
+        => string.Join(" ", Enumerable.Range(0, (secret.Length + 3) / 4)
+            .Select(i => secret.Substring(i * 4, Math.Min(4, secret.Length - i * 4))));
+
+    private static string ResultText(string code) => code switch
+    {
+        "acildi" => "İki adımlı doğrulama açıldı. Kurtarma kodlarınızı güvenli bir yere kaydedin.",
+        "kapatildi" => "İki adımlı doğrulama kapatıldı.",
+        "zorunlu-acik" => "Owner ve admin rolleri için 2FA zorunlu kılındı.",
+        "zorunlu-kapali" => "2FA zorunluluğu kaldırıldı.",
+        _ => "İşlem tamamlandı.",
+    };
+
+    private static string ErrorText(string code) => code switch
+    {
+        "totp.invalid_code" => "Kod doğrulanamadı. Uygulamadaki güncel 6 haneli kodu girin.",
+        "totp.already_enabled" => "İki adımlı doğrulama zaten açık.",
+        "totp.no_pending" => "Bekleyen kurulum yok — önce kurulumu başlatın.",
+        "totp.not_enabled" => "İki adımlı doğrulama zaten kapalı.",
+        "rol-yetersiz" => "Bu ayar için 'owner' rolü gerekli.",
+        _ => "İşlem tamamlanamadı. Lütfen tekrar deneyin.",
+    };
+}

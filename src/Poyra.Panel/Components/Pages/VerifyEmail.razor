@@ -1,0 +1,66 @@
+@page "/eposta-dogrula"
+@layout AuthLayout
+@attribute [AllowAnonymous]
+
+<PageTitle>E-posta doğrulama — Poyra</PageTitle>
+
+<div class="login">
+    <h2 class="auth-title">E-posta doğrulama</h2>
+    <p class="auth-lead">Adresinizin size ait olduğunu doğruluyoruz.</p>
+
+
+    @if (Sonuc == "dogrulandi")
+    {
+        <div class="card center">
+            <div class="mark ok" aria-hidden="true">✓</div>
+            <h2>Adresiniz doğrulandı</h2>
+            <p class="hint">Artık panele giriş yapabilirsiniz.</p>
+            <p class="login-links"><a href="/giris">Panele giriş yap</a></p>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(Hata))
+    {
+        <div class="card center">
+            <div class="mark err" aria-hidden="true">!</div>
+            <h2>Doğrulanamadı</h2>
+            <p class="hint">@HataText(Hata)</p>
+            <p class="login-links"><a href="/giris">Girişe dön</a></p>
+        </div>
+    }
+    else if (Belirteç is { Length: > 0 })
+    {
+
+        <form method="post" action="/eposta-dogrula" class="card center">
+            <AntiforgeryToken />
+            <input type="hidden" name="belirteç" value="@Belirteç" />
+            <p>E-posta adresinizi doğrulamak için tıklayın.</p>
+            <button type="submit" class="primary">E-postamı doğrula</button>
+        </form>
+    }
+    else
+    {
+        <div class="card center">
+            <div class="mark err" aria-hidden="true">!</div>
+            <h2>Bağlantı eksik</h2>
+            <p class="hint">Bu sayfaya e-postanızdaki doğrulama bağlantısıyla gelmelisiniz.</p>
+            <p class="login-links"><a href="/giris">Girişe dön</a></p>
+        </div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "belirteç")]
+    private string? Belirteç { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private static string HataText(string? kod) => kod switch
+    {
+        "belirteç-gecersiz" => "Doğrulama bağlantısı geçersiz ya da süresi dolmuş. Panelden yenisini isteyin.",
+        _ => "Doğrulama tamamlanamadı. Panelden yeni bağlantı isteyin.",
+    };
+}

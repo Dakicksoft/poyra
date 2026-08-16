@@ -1,0 +1,253 @@
+@page "/analiz"
+@attribute [Authorize]
+@using Poyra.Modules.Payments.Features.Analytics
+@using Poyra.Modules.Connectors.Features
+@using Poyra.Modules.Recon.Features
+@inject IDispatcher Dispatcher
+
+<PageTitle>Analiz — Poyra</PageTitle>
+
+<h1>Analiz</h1>
+<p class="lead">
+    Son @(_overview?.Days ?? Gun) günün özeti. Başarı oranı <strong>deneme</strong> bazında
+    ölçülür — ödeme bazında ölçmek failover'ı gizler ve bozuk POS'u iyi gösterir.
+</p>
+
+<form method="get" class="filters">
+    <label>
+        Dönem
+        <select name="gun">
+            @foreach (var (value, label) in Periods)
+            {
+                <option value="@value" selected="@(Gun == value)">@label</option>
+            }
+        </select>
+    </label>
+    <button type="submit" class="ghost">Uygula</button>
+</form>
+
+@if (_overview is { } o)
+{
+    <div class="tiles">
+        <div class="tile">
+            <span class="label">Tahsilat (GMV)</span>
+            <span class="value">@Fmt.Money(o.GmvMinor, "TRY")</span>
+            <span class="sub">@o.Succeeded başarılı işlem</span>
+        </div>
+        <div class="tile @(o.SuccessRate < 0.8 && o.Attempts >= AnalyticsOverviewHandler.MinimumSample ? "warn" : "")">
+            <span class="label">Başarı oranı</span>
+            <span class="value">@Fmt.Percent(o.SuccessRate)</span>
+            <span class="sub">@o.Attempts denemede</span>
+        </div>
+        <div class="tile">
+            <span class="label">Ortalama sepet</span>
+            <span class="value">@Fmt.Money(o.AverageBasketMinor, "TRY")</span>
+            <span class="sub">@o.PaymentCount ödeme kaydı</span>
+        </div>
+        <div class="tile">
+            <span class="label">Banka yanıtı</span>
+            <span class="value">@(o.MedianLatencyMs is { } ms ? ms + " ms" : "—")</span>
+            <span class="sub">ortanca</span>
+        </div>
+    </div>
+
+    @if (_cost is { } cost && (cost.AuditedCount > 0 || cost.UnauditedCount > 0))
+    {
+        <div class="tiles">
+            @if (cost.AuditedCount > 0)
+            {
+                <div class="tile">
+                    <span class="label">Gerçek komisyon</span>
+                    <span class="value">@Fmt.Money(cost.CommissionMinor, "TRY")</span>
+                    <span class="sub">bankanın kestiği · @Fmt.RateBps(cost.EffectiveRateBps)</span>
+                </div>
+                <div class="tile">
+                    <span class="label">Anlaşmadan fark</span>
+                    <span class="value @(cost.DeltaMinor > 0 ? "err-text" : cost.DeltaMinor < 0 ? "ok-text" : "")">
+                        @Fmt.Money(cost.DeltaMinor, "TRY")
+                    </span>
+                    <span class="sub @(cost.DeltaMinor > 0 ? "err-text" : "")">
+                        @(cost.DeltaMinor > 0 ? "fazla kesim — itiraz edilebilir"
+                            : cost.DeltaMinor < 0 ? "eksik kesim" : "fark yok")
+                    </span>
+                </div>
+            }
+            @if (cost.UnauditedCount > 0)
+            {
+                <div class="tile warn">
+                    <span class="label">Denetlenemeyen</span>
+                    <span class="value">@cost.UnauditedCount</span>
+                    <span class="sub">anlaşma tanımsız — "fark yok" DEĞİL</span>
+                </div>
+            }
+        </div>
+        @if (cost.AuditedCount == 0)
+        {
+            <p class="hint">
+                Bu dönemde hiçbir işlem denetlenemedi: komisyon anlaşması tanımlı değil.
+                Oranlar tanımlanınca (<code>POST /v1/recon/agreements</code>) banka kesintisi
+                anlaşmayla otomatik karşılaştırılır.
+            </p>
+        }
+    }
+
+    @* Günlük trend: boş günler atlanmaz, delik bırakmak trendi yanlış gösterir *@
+    <div class="spark-head">
+        @{
+            var peakDay = o.ByDay.MaxBy(d => d.GmvMinor)!;
+            var peak = Math.Max(1, peakDay.GmvMinor);
+            var midDay = o.ByDay[o.ByDay.Count / 2].Day;
+        }
+        <h2>Günlük seyir</h2>
+        <span class="hint">tepe: @Fmt.Money(peakDay.GmvMinor, "TRY") · @Fmt.DateOnly(peakDay.Day)</span>
+    </div>
+    <div class="spark" role="img"
+         aria-label="Günlük tahsilat grafiği — @o.Days günde @Fmt.Money(o.GmvMinor, "TRY"), tepe @Fmt.DateOnly(peakDay.Day)">
+        @foreach (var day in o.ByDay)
+        {
+            <span class="bar" style="height: @(Math.Max(2, day.GmvMinor * 100 / peak))%"
+                  title="@Fmt.DateOnly(day.Day): @Fmt.Money(day.GmvMinor, "TRY") · @day.Succeeded/@day.Attempts"></span>
+        }
+    </div>
+    <div class="hint" style="display: flex; justify-content: space-between;">
+        <span>@Fmt.DateOnly(o.FromDay)</span>
+        <span>@Fmt.DateOnly(midDay)</span>
+        <span>@Fmt.DateOnly(o.ToDay)</span>
+    </div>
+    <p class="hint">
+        @o.Days günde toplam @Fmt.Money(o.GmvMinor, "TRY") tahsilat; en yüksek gün
+        @Fmt.DateOnly(peakDay.Day) (@Fmt.Money(peakDay.GmvMinor, "TRY")).
+    </p>
+
+    <h2>Başarısızlık nedenleri</h2>
+    @if (o.Failures.Count == 0)
+    {
+        <p class="empty">Bu dönemde başarısız deneme yok.</p>
+    }
+    else
+    {
+        <p class="hint">
+            En büyük kalem genelde tek bir düzeltilebilir şeydir: yanlış taksit şeması,
+            kapalı POS ya da 3D'yi tamamlamayan müşteri.
+        </p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th>Neden</th><th class="num">Adet</th><th class="num">Pay</th><th>Kod</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var failure in o.Failures)
+                    {
+                        <tr>
+                            <td>@failure.Label</td>
+                            <td class="num">@failure.Count</td>
+                            <td class="num">@Fmt.Percent(failure.Share)</td>
+                            <td class="mono hint">@failure.Code</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h2>POS karşılaştırması</h2>
+    <BreakdownTable Rows="_byConnector" FirstColumn="POS" />
+
+    <h2>Taksit dağılımı</h2>
+    <BreakdownTable Rows="o.ByInstallment" FirstColumn="Taksit" />
+
+    <h2>Kart programı</h2>
+    <p class="hint">
+        Hangi kampanya hacim getiriyor? Program, kartın BIN'inden türetilir — kart verisi değildir.
+    </p>
+    <BreakdownTable Rows="o.ByCardProgram" FirstColumn="Program" />
+
+    @if (_cost is { ByInstallment.Count: > 0 })
+    {
+        <h2>Taksit başına gerçek maliyet</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Taksit</th>
+                        <th class="num">İşlem</th>
+                        <th class="num">Ciro</th>
+                        <th class="num">Komisyon</th>
+                        <th class="num">Oran</th>
+                        <th class="num">Fark</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _cost.ByInstallment)
+                    {
+                        <tr>
+                            <td>@(row.Installments == 1 ? "Tek çekim" : row.Installments + " taksit")</td>
+                            <td class="num">@row.Count</td>
+                            <td class="num mono">@Fmt.Money(row.GrossMinor, "TRY")</td>
+                            <td class="num mono">@Fmt.Money(row.CommissionMinor, "TRY")</td>
+                            <td class="num mono">@Fmt.RateBps(row.EffectiveRateBps)</td>
+                            <td class="num mono @(row.DeltaMinor > 0 ? "err-text" : row.DeltaMinor < 0 ? "ok-text" : "")">
+                                @Fmt.Money(row.DeltaMinor, "TRY")
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <div class="spark-head">
+        @{
+            var busiestHour = o.ByHour.MaxBy(h => h.Attempts)!;
+            var busiest = Math.Max(1, busiestHour.Attempts);
+        }
+        <h2>Saat dağılımı (TR)</h2>
+        <span class="hint">en yoğun: @busiestHour.Hour:00 · @busiestHour.Attempts deneme</span>
+    </div>
+    <div class="spark hours" role="img"
+         aria-label="Saatlik işlem grafiği — en yoğun saat @busiestHour.Hour:00, @busiestHour.Attempts deneme">
+        @foreach (var hour in o.ByHour)
+        {
+            <span class="bar" style="height: @(hour.Attempts == 0 ? 2 : Math.Max(4, hour.Attempts * 100 / busiest))%"
+                  title="@hour.Hour:00 — @hour.Attempts deneme, @hour.Succeeded başarılı"></span>
+        }
+    </div>
+    <div class="hint" style="display: flex; justify-content: space-between;">
+        <span>00:00</span>
+        <span>12:00</span>
+        <span>23:00</span>
+    </div>
+}
+
+@code {
+    private static readonly (int Value, string Label)[] Periods =
+    [
+        (7, "Son 7 gün"),
+        (30, "Son 30 gün"),
+        (90, "Son 90 gün"),
+    ];
+
+    private AnalyticsOverviewDto? _overview;
+    private CostSummaryDto? _cost;
+    private IReadOnlyList<BreakdownRow> _byConnector = [];
+
+    [SupplyParameterFromQuery(Name = "gun")]
+    private int Gun { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var days = Gun is 7 or 30 or 90 ? Gun : 30;
+        Gun = days;
+
+        _overview = await Dispatcher.Ask(new AnalyticsOverviewQuery(days));
+        _cost = await Dispatcher.Ask(new CostSummaryQuery(days));
+
+        var accounts = (await Dispatcher.Ask(new ListConnectorAccountsQuery()))
+            .ToDictionary(a => a.Id, a => a.Label);
+        _byConnector = _overview.ByConnector
+            .Select(r => r.AccountId is { } id && accounts.TryGetValue(id, out var label)
+                ? r with { Label = label }
+                : r with { Label = $"{r.Label} (kaldırılmış hesap)" })
+            .ToList();
+    }
+}

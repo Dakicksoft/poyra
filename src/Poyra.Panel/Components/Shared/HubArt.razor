@@ -1,0 +1,47 @@
+<svg class="hub-art" viewBox="0 0 320 320" role="img" aria-labelledby="hubArtTitle" focusable="false">
+    <title id="hubArtTitle">Ödeme yollarının tek göbekte birleşmesini gösteren çizim</title>
+
+    <defs>
+        <radialGradient id="hubGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="var(--bakir)" stop-opacity=".35" />
+            <stop offset="70%" stop-color="var(--bakir)" stop-opacity="0" />
+        </radialGradient>
+    </defs>
+
+    <circle cx="160" cy="160" r="150" fill="url(#hubGlow)" />
+
+    <circle class="hub-rim" cx="160" cy="160" r="132"
+            fill="none" stroke="var(--celik)" stroke-width="2"
+            stroke-dasharray="10 14" opacity=".7" />
+
+    @for (var i = 0; i < 8; i++)
+    {
+        var angle = i * 45 * Math.PI / 180;
+        var x = 160 + Math.Cos(angle) * 126;
+        var y = 160 + Math.Sin(angle) * 126;
+        var inner = 160 + Math.Cos(angle) * 46;
+        var innerY = 160 + Math.Sin(angle) * 46;
+        var delay = (i * 0.35).ToString("0.00", Culture);
+
+        <line x1="@F(x)" y1="@F(y)" x2="@F(inner)" y2="@F(innerY)"
+              stroke="var(--celik)" stroke-width="2" opacity=".55" />
+
+        <circle cx="@F(x)" cy="@F(y)" r="5" fill="var(--gece-2)"
+                stroke="var(--celik)" stroke-width="2" />
+
+        <circle class="hub-pulse" r="4" fill="var(--kor)" style="animation-delay: @(delay)s">
+            <animateMotion dur="2.8s" repeatCount="indefinite" begin="@(delay)s"
+                           path="@($"M {F(x)} {F(y)} L {F(inner)} {F(innerY)}")" />
+        </circle>
+    }
+
+    <circle cx="160" cy="160" r="42" fill="var(--gece-2)" stroke="var(--celik)" stroke-width="3" />
+    <circle class="hub-core" cx="160" cy="160" r="14" fill="var(--bakir)" />
+</svg>
+
+@code {
+    private static readonly System.Globalization.CultureInfo Culture =
+        System.Globalization.CultureInfo.InvariantCulture;
+
+    private static string F(double value) => value.ToString("0.##", Culture);
+}

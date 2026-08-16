@@ -1,0 +1,187 @@
+:root {
+    --kagit: #F7F5F2;
+    --beyaz: #FFFFFF;
+    --gece: #0B1220;
+    --bakir: #C4713B;
+    --kor: #E08A4C;
+    --metin: #1A2233;
+    --metin-soluk: #5B6472;
+    --cizgi: #E5E1DB;
+    --basari: #1F9D6B;
+    --hata: #DC2626;
+    color-scheme: light;
+}
+
+::selection { background: rgba(196, 113, 59, .25); }
+:focus-visible { outline: 2px solid var(--bakir); outline-offset: 2px; border-radius: 3px; }
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--kagit);
+    color: var(--metin);
+    font-family: Inter, "Segoe UI", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+}
+
+.wrap { max-width: 480px; margin: 0 auto; padding: min(6vh, 3.5rem) 1rem 2rem; }
+@media (max-width: 420px) {
+    .wrap { padding-top: .75rem; }
+    .card { padding: 1.15rem 1rem; }
+}
+
+.card {
+    background: var(--beyaz);
+    border: 1px solid var(--cizgi);
+    border-radius: 14px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(11,18,32,.06), 0 8px 24px rgba(11,18,32,.05);
+}
+.card.center { text-align: center; }
+
+h1 { font-family: Manrope, Inter, sans-serif; font-size: 1.35rem; margin: 0 0 .5rem; }
+.amount {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 2rem; font-variant-numeric: tabular-nums; margin: .25rem 0 1.25rem;
+}
+.hint { color: var(--metin-soluk); font-size: .85rem; }
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+label { display: block; margin-bottom: 1rem; font-size: .9rem; color: var(--metin-soluk); }
+input[type="number"], input[type="text"] {
+    width: 100%; margin-top: .3rem; padding: .7rem .8rem; font-size: 1.05rem;
+    border: 1px solid var(--cizgi); border-radius: 9px; background: var(--beyaz); color: var(--metin);
+}
+input:focus { outline: 2px solid var(--bakir); outline-offset: 1px; }
+
+button.pay, a.pay {
+    display: block; width: 100%; padding: .85rem 1rem; margin-top: .5rem;
+    background: var(--marka, var(--bakir)); color: #FFF8F2; border: 0; border-radius: 9px;
+    font-size: 1.05rem; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none;
+}
+button.pay:hover, a.pay:hover { filter: brightness(1.1); }
+button.pay:disabled { opacity: .75; cursor: wait; filter: none; }
+
+button.pay.loading::before {
+    content: ""; display: inline-block; vertical-align: -3px; margin-right: .5rem;
+    width: 15px; height: 15px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+    animation: spin .8s linear infinite;
+}
+
+.trust {
+    display: flex; align-items: center; justify-content: center; gap: .45rem;
+    margin-top: .8rem; font-size: .78rem; color: var(--metin-soluk);
+}
+.trust svg { flex: none; }
+button.ghost {
+    width: 100%; min-height: 44px; padding: .6rem .9rem; font-size: 1rem;
+    background: transparent; color: var(--metin);
+    border: 1px solid var(--cizgi); border-radius: 9px; cursor: pointer;
+}
+button.ghost:disabled { opacity: .6; cursor: wait; }
+
+.bin-form { border-bottom: 1px solid var(--cizgi); padding-bottom: 1rem; margin-bottom: 1rem; }
+.bin-form label { margin-bottom: .35rem; }
+.bin-form .hint { margin: 0 0 .85rem; }
+.bin-form button + .hint { margin: .6rem 0 0; }
+
+.installments { border: 0; padding: 0; margin: 0 0 1rem; }
+.installments legend { font-size: .9rem; color: var(--metin-soluk); padding: 0 0 .4rem; }
+.option {
+    display: flex; align-items: center; gap: .65rem; margin: 0 0 .5rem; padding: .7rem .8rem;
+    min-height: 48px;
+    border: 1px solid var(--cizgi); border-radius: 9px; cursor: pointer; color: var(--metin);
+}
+.option:has(input:checked) { border-color: var(--marka, var(--bakir)); background: rgba(196,113,59,.05); }
+.option:focus-within { border-color: var(--marka, var(--bakir)); background: rgba(196,113,59,.05); }
+.option input { margin: 0; width: 18px; height: 18px; flex: none; accent-color: var(--marka, var(--bakir)); }
+.option .label { font-weight: 600; }
+.option .detail { margin-left: auto; text-align: right; font-size: .78rem; color: var(--metin-soluk); }
+.option .detail span { display: block; }
+.option .total {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums;
+    font-size: .98rem; font-weight: 600; color: var(--metin);
+}
+.option .nofee { color: var(--basari); }
+
+.alert { padding: .7rem .9rem; border-radius: 9px; margin-bottom: 1rem; font-size: .9rem; }
+.alert.error { color: var(--hata); background: rgba(220,38,38,.07); border: 1px solid rgba(220,38,38,.3); }
+
+.mark {
+    width: 56px; height: 56px; line-height: 54px; margin: 0 auto 1rem;
+    border-radius: 50%; font-size: 1.8rem; font-weight: 700;
+}
+.mark.ok { background: rgba(31,157,107,.12); color: var(--basari); }
+.mark.err { background: rgba(220,38,38,.1); color: var(--hata); }
+
+.receipt {
+    margin: 0 0 1rem; padding: .85rem 1rem; text-align: left;
+    background: var(--kagit); border: 1px solid var(--cizgi); border-radius: 10px;
+    font-size: .88rem;
+}
+.receipt div { display: flex; justify-content: space-between; gap: 1rem; padding: .2rem 0; }
+.receipt dt { color: var(--metin-soluk); flex: none; }
+.receipt dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.receipt .mono { font-size: .82rem; }
+
+.support-line { margin-top: .9rem; }
+.support-line a {
+    color: var(--metin); display: inline-block;
+    padding: .65rem .3rem; margin: -.55rem 0;
+}
+
+footer {
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: .35rem .75rem;
+    margin-top: 1.25rem; font-size: .78rem; color: var(--metin-soluk);
+}
+footer.plain { justify-content: center; }
+.secure { display: inline-flex; align-items: center; gap: .4rem; }
+.secure svg { flex: none; }
+@media (max-width: 420px) {
+    footer { flex-direction: column; text-align: center; gap: .5rem; }
+}
+.brand-mini { display: inline-flex; align-items: center; gap: .35rem; letter-spacing: .1em; }
+.hub {
+    width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--gece);
+    display: inline-block; position: relative;
+}
+.hub::after {
+    content: ""; position: absolute; inset: 50% auto auto 50%;
+    width: 7px; height: 2px; background: var(--bakir);
+    transform: translate(-1px, -1px) rotate(-35deg); transform-origin: left center;
+}
+
+.redirecting {
+    display: flex; align-items: center; justify-content: center; padding: 1rem;
+    min-height: 100vh; min-height: 100dvh; /* mobil adres çubuğu payı */
+}
+.redirecting .card { max-width: 380px; }
+.spinner {
+    width: 34px; height: 34px; margin: 0 auto 1rem; border-radius: 50%;
+    border: 3px solid var(--cizgi); border-top-color: var(--bakir);
+    animation: spin .9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.merchant {
+    display: flex; justify-content: center; align-items: center;
+    padding: 1.25rem 0 .25rem; min-height: 48px;
+}
+.merchant-logo {
+    max-height: 44px; max-width: 220px; object-fit: contain;
+    font-weight: 600; color: var(--marka, var(--bakir));
+}
+.merchant-name {
+    font-size: 1.05rem; font-weight: 600; letter-spacing: .01em;
+    color: var(--marka, #C4713B);
+}
+footer .support { font-size: .8rem; }
+footer .support a {
+    display: inline-block; margin: -.5rem 0 -.5rem .15rem;
+    padding: .6rem .3rem;
+    color: var(--metin);
+}

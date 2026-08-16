@@ -1,0 +1,165 @@
+@page "/l/{Slug}/sonuc"
+@using Poyra.Modules.PaymentLinks.Contracts
+@using Poyra.Modules.Payments.Features.GetPayment
+@inject ICheckoutLinkResolver Links
+@inject IDispatcher Dispatcher
+@inject ITenantBrandingSource BrandingSource
+
+<MerchantBrand Branding="_brand" />
+
+@if (_succeeded)
+{
+    <PageTitle>Ödeme başarılı</PageTitle>
+    <div class="card center success" style="--marka: @(_brand?.PrimaryColor ?? "#C4713B")">
+        <div class="mark ok" aria-hidden="true">✓</div>
+        <h1>Ödemeniz alındı</h1>
+        @if (_amount is { } amount)
+        {
+            <p class="amount">@Money(amount, _currency)</p>
+        }
+
+        @* Dekont: müşterinin ekran görüntüsü alacağı satırlar — tarih, işyeri, işlem no *@
+        <dl class="receipt">
+            @if (_when is { } when)
+            {
+                <div>
+                    <dt>Tarih</dt>
+                    <dd>@when.ToString("d MMMM yyyy, HH:mm", Tr)</dd>
+                </div>
+            }
+            @if (_installments > 1)
+            {
+                <div>
+                    <dt>Ödeme</dt>
+                    <dd>@_installments taksit</dd>
+                </div>
+            }
+            @if (_brand?.DisplayName is { Length: > 0 } merchant)
+            {
+                <div>
+                    <dt>İşyeri</dt>
+                    <dd>@merchant</dd>
+                </div>
+            }
+            <div>
+                <dt>İşlem No</dt>
+                <dd class="mono">@PoyraPaymentId</dd>
+            </div>
+        </dl>
+
+        <p>Ödemeniz @(_brand?.DisplayName is { Length: > 0 } name ? $"{name} işyerine" : "satıcıya") iletildi.</p>
+        <p class="hint">Bir sorun olursa iletebilmek için işlem numaranızı not alın. Bu sayfayı kapatabilirsiniz.</p>
+    </div>
+}
+else
+{
+    <PageTitle>Ödeme tamamlanamadı</PageTitle>
+    <div class="card center failure" style="--marka: @(_brand?.PrimaryColor ?? "#C4713B")">
+        <div class="mark err" aria-hidden="true">!</div>
+        <h1>Ödeme tamamlanamadı</h1>
+        <p>@_message</p>
+        <a class="pay" href="@RetryUrl">Tekrar dene</a>
+        @if (_brand is { } b && (b.SupportPhone is { Length: > 0 } || b.SupportEmail is { Length: > 0 }))
+        {
+            <p class="hint support-line">
+                Sorun devam ederse @b.DisplayName ile iletişime geçin:
+                @if (b.SupportPhone is { Length: > 0 } phone)
+                {
+                    <a href="tel:@phone.Replace(" ", "")">@phone</a>
+                }
+                @if (b.SupportEmail is { Length: > 0 } email)
+                {
+                    <a href="mailto:@email">@email</a>
+                }
+            </p>
+        }
+    </div>
+}
+
+<MerchantFooter Branding="_brand" />
+
+@code {
+    private static readonly System.Globalization.CultureInfo Tr =
+        System.Globalization.CultureInfo.GetCultureInfo("tr-TR");
+
+    private static readonly TimeSpan TrOffset = TimeSpan.FromHours(3);
+
+    [Parameter]
+    public string Slug { get; set; } = "";
+
+    [SupplyParameterFromQuery(Name = "poyra_payment_id")]
+    private string? PoyraPaymentId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "kod")]
+    private string? Kod { get; set; }
+
+    private bool _succeeded;
+    private CheckoutBranding? _brand;
+    private long? _amount;
+    private DateTimeOffset? _when;
+    private int _installments = 1;
+    private bool _openAmount;
+    private string _currency = "TRY";
+    private string _message = "Ödeme tamamlanamadı. Lütfen tekrar deneyin.";
+
+    private string RetryUrl
+        => _openAmount && _amount is > 0 ? $"/l/{Slug}?tutar={_amount}" : $"/l/{Slug}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var link = await Links.ResolveAsync(Slug, default);
+        if (link is not null)
+        {
+            _brand = Localize(await BrandingSource.GetAsync(link.TenantId, default));
+            _openAmount = link.AmountMinor is null;
+        }
+
+        if (link is null || PoyraPaymentId is not { Length: > 0 })
+        {
+            _message = ErrorText(Kod);
+            return;
+        }
+
+        var payment = await Dispatcher.Ask(new GetPaymentQuery(PoyraPaymentId));
+        if (payment is null)
+            return;
+
+        _amount = payment.ChargedAmountMinor ?? payment.AmountMinor;
+        _currency = payment.Currency;
+        _when = payment.CreatedAt.ToOffset(TrOffset);
+        _installments = payment.Installments;
+        _succeeded = payment.Status == Modules.Payments.Domain.PaymentStatus.Succeeded;
+
+        if (!_succeeded)
+        {
+            _message = ErrorText(payment.LastError?.Code ?? Kod);
+            return;
+        }
+
+        await Links.RegisterSuccessAsync(
+            link.TenantId, link.LinkId, payment.Id, _amount ?? 0, default);
+    }
+
+    private CheckoutBranding Localize(CheckoutBranding brand)
+        => brand.LogoUrl is null ? brand : brand with { LogoUrl = $"/l/{Slug}/logo" };
+
+    private static string ErrorText(string? code) => code switch
+    {
+        "poyra.insufficient_funds" => "Kartınızın limiti yetersiz. Farklı bir kartla deneyebilirsiniz.",
+        "poyra.card_declined" => "Bankanız işlemi onaylamadı. Farklı bir kartla deneyebilirsiniz.",
+        "poyra.expired_card" => "Kartınızın son kullanma tarihi geçmiş.",
+        "poyra.invalid_card" => "Kart bilgileri hatalı görünüyor.",
+        "poyra.limit_exceeded" => "İşlem limitiniz aşıldı.",
+        "poyra.three_ds_failed" => "3D güvenlik doğrulaması tamamlanamadı.",
+        "poyra.three_ds_timeout" => "3D güvenlik doğrulaması zaman aşımına uğradı.",
+        "poyra.issuer_unavailable" or "poyra.connector_unavailable" =>
+            "Bankaya şu an ulaşılamıyor. Birkaç dakika sonra tekrar deneyin.",
+        _ => "Ödeme tamamlanamadı. Lütfen tekrar deneyin.",
+    };
+
+    private static string Money(long amountMinor, string currency)
+    {
+        var symbol = currency switch { "TRY" => "₺", "USD" => "$", "EUR" => "€", _ => currency };
+        return $"{(amountMinor / 100m).ToString("N2", Tr)} {symbol}";
+    }
+}

@@ -1,0 +1,96 @@
+@page "/odemeler"
+@attribute [Authorize]
+@using Poyra.Modules.Payments.Features.ListPayments
+@inject IDispatcher Dispatcher
+
+<PageTitle>Ödemeler — Poyra</PageTitle>
+
+<h1>Ödemeler</h1>
+
+<form method="get" class="filters">
+    <label>
+        Durum
+        <select name="durum">
+            <option value="">Tümü</option>
+            @foreach (var (value, label) in Statuses)
+            {
+                <option value="@value" selected="@(Durum == value)">@label</option>
+            }
+        </select>
+    </label>
+    <button type="submit" class="secondary">Filtrele</button>
+</form>
+
+@if (_items.Count > 0)
+{
+    <p class="hint">
+        @(_before is { } cursor
+            ? $"{Fmt.Date(cursor)} öncesinden {_items.Count} kayıt"
+            : $"En yeni {_items.Count} kayıt")@(_hasMore ? "" : " — listenin sonu")
+    </p>
+}
+
+<PaymentTable Items="_items" />
+
+@if (_before is not null || _hasMore)
+{
+    <div class="actions">
+        @if (_before is not null)
+        {
+            <a class="ghost" href="@PageUrl(before: null)">← En yeniye dön</a>
+        }
+        @if (_hasMore)
+        {
+            <a class="ghost" href="@PageUrl(before: _items[^1].CreatedAt)">Daha eski →</a>
+        }
+    </div>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    private static readonly (string Value, string Label)[] Statuses =
+    [
+        ("succeeded", "Başarılı"),
+        ("failed", "Başarısız"),
+        ("requires_action", "3D Bekliyor"),
+        ("processing", "İşleniyor"),
+        ("cancelled", "İptal"),
+        ("expired", "Süresi doldu"),
+        ("created", "Oluşturuldu"),
+    ];
+
+    private IReadOnlyList<PaymentListItemDto> _items = [];
+    private bool _hasMore;
+    private DateTimeOffset? _before;
+
+    [SupplyParameterFromQuery(Name = "durum")]
+    private string? Durum { get; set; }
+
+    [SupplyParameterFromQuery(Name = "once")]
+    private string? Once { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _before = DateTimeOffset.TryParse(
+            Once, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : null;
+
+        var page = await Dispatcher.Ask(new ListPaymentsQuery(
+            string.IsNullOrEmpty(Durum) ? null : Durum, Limit: PageSize + 1, Before: _before));
+
+        _hasMore = page.Count > PageSize;
+        _items = _hasMore ? page.Take(PageSize).ToList() : page;
+    }
+
+    private string PageUrl(DateTimeOffset? before)
+    {
+        var query = new List<string>(2);
+        if (!string.IsNullOrEmpty(Durum))
+            query.Add("durum=" + Uri.EscapeDataString(Durum));
+        if (before is { } cursor)
+            query.Add("once=" + Uri.EscapeDataString(cursor.UtcDateTime.ToString("O")));
+        return query.Count == 0 ? "/odemeler" : "/odemeler?" + string.Join("&", query);
+    }
+}

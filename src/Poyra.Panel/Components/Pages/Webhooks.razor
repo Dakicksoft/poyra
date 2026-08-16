@@ -1,0 +1,262 @@
+@page "/webhooklar"
+@attribute [Authorize]
+@using Poyra.Modules.Webhooks.Contracts
+@using Poyra.Modules.Webhooks.Features
+@using Poyra.SharedKernel.Tenancy
+@using Poyra.Panel.Security
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+@inject OneTimeSecretStash Stash
+
+<PageTitle>Webhook'lar — Poyra</PageTitle>
+
+<h1>Webhook'lar</h1>
+<p class="lead">
+    Ödeme sonuçlanınca sisteminize haber veririz. Teslimat başarısız olursa
+    <strong>7 kez, üstel aralıklarla</strong> yeniden denenir (~32 saat); sonra kuyrukta
+    kalır ve buradan elle yeniden gönderilebilir.
+</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+@if (!string.IsNullOrEmpty(_sir))
+{
+    <div class="alert warn" role="alert">
+        <strong>İmza sırrı (yalnız şimdi görünür):</strong>
+        <div class="mono secret">@_sir</div>
+        Sunucunuza kaydedin — bu sayfadan ayrılınca bir daha gösterilmez.
+        <button type="button" class="link"
+                onclick="navigator.clipboard.writeText(this.parentElement.querySelector('.secret').textContent.trim());this.textContent='Kopyalandı ✓'">
+            Kopyala
+        </button>
+    </div>
+}
+
+<h2>Uç noktalar</h2>
+@if (_endpoints.Count == 0)
+{
+    <p class="empty">Webhook ucu yok — aşağıdan ekleyin.</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Adres</th>
+                    <th>Olaylar</th>
+                    <th>Durum</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var endpoint in _endpoints)
+                {
+                    <tr>
+                        <td class="mono">@endpoint.Url</td>
+                        <td>
+                            @if (endpoint.EventTypes.Length == 0)
+                            {
+                                <span class="hint">tümü</span>
+                            }
+                            else
+                            {
+                                @string.Join(", ", endpoint.EventTypes)
+                            }
+                        </td>
+                        <td>
+                            <span class="badge @(endpoint.Active ? "ok" : "muted")">
+                                @(endpoint.Active ? "Açık" : "Kapalı")
+                            </span>
+                        </td>
+                        <td class="row-actions">
+                            @if (_canWrite)
+                            {
+                                <form method="post" action="/webhooklar/@endpoint.Id/sir">
+                                    <AntiforgeryToken />
+                                    <button type="submit" class="link">Sırrı yenile</button>
+                                </form>
+                                <form method="post" action="/webhooklar/@endpoint.Id/durum">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="active" value="@(endpoint.Active ? "false" : "true")" />
+                                    <button type="submit" class="link @(endpoint.Active ? "danger" : "")">
+                                        @(endpoint.Active ? "Kapat" : "Aç")
+                                    </button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_canWrite)
+{
+    <h2>Yeni uç nokta</h2>
+    <form method="post" action="/webhooklar/ekle" class="endpoint-form">
+        <AntiforgeryToken />
+        <label>
+            Adres (HTTPS)
+            <input type="url" name="url" required placeholder="https://sisteminiz.com/poyra-webhook" />
+        </label>
+
+        <fieldset class="event-picker">
+            <legend>Olaylar (en az bir tane)</legend>
+            @foreach (var eventType in KnownEvents)
+            {
+                <label class="check">
+                    <input type="checkbox" name="eventTypes" value="@eventType" checked />
+                    <span class="mono">@eventType</span>
+                </label>
+            }
+        </fieldset>
+
+        <button type="submit" class="primary">Ekle</button>
+    </form>
+    <p class="hint">
+        İmzayı doğrulayın: <span class="mono">Poyra-Signature: t=&lt;zaman&gt;,v1=&lt;hmac&gt;</span> —
+        HMAC-SHA256(<span class="mono">t + "." + gövde</span>, sır). Doğrulamayan uç, sahte
+        bildirimle kandırılabilir.
+    </p>
+}
+
+<h2>Son teslimatlar</h2>
+<form method="get" class="filters">
+    <label>
+        Durum
+        <select name="durum">
+            <option value="">Tümü</option>
+            <option value="pending" selected="@(Durum == "pending")">Bekliyor</option>
+            <option value="delivered" selected="@(Durum == "delivered")">Teslim edildi</option>
+            <option value="failed" selected="@(Durum == "failed")">Başarısız</option>
+        </select>
+    </label>
+    <button type="submit" class="ghost">Filtrele</button>
+</form>
+
+@if (_deliveries.Count == 0)
+{
+    <p class="empty">Kayıt yok.</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Olay</th>
+                    <th>Durum</th>
+                    <th class="num">Deneme</th>
+                    <th>Son yanıt</th>
+                    <th>Sıradaki deneme</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var delivery in _deliveries)
+                {
+                    <tr>
+                        <td class="mono">@delivery.EventType</td>
+                        <td>
+                            <span class="badge @StatusClass(delivery.Status.ToString())">
+                                @StatusLabel(delivery.Status.ToString())
+                            </span>
+                            @if (delivery.ReplayOfId is not null)
+                            {
+                                <div class="hint">yeniden gönderim</div>
+                            }
+                        </td>
+                        <td class="num">@delivery.AttemptCount</td>
+                        <td>
+                            @if (delivery.LastHttpStatus is { } status)
+                            {
+                                <span class="mono">HTTP @status</span>
+                            }
+                            @if (delivery.LastError is { Length: > 0 } error)
+                            {
+                                <div class="hint">@Shorten(error)</div>
+                            }
+                        </td>
+                        <td class="mono">
+                            @(delivery.NextRetryAt is { } next ? Fmt.Date(next) : "—")
+                        </td>
+                        <td>
+                            @if (_canWrite)
+                            {
+                                <form method="post" action="/webhooklar/teslimat/@delivery.Id/yeniden">
+                                    <AntiforgeryToken />
+                                    <button type="submit" class="link">Yeniden gönder</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private static readonly string[] KnownEvents = [.. KnownWebhookEvents.All.Order()];
+
+    private IReadOnlyList<WebhookEndpointResponse> _endpoints = [];
+    private IReadOnlyList<WebhookDeliveryResponse> _deliveries = [];
+
+    private bool _canWrite;
+
+    [SupplyParameterFromQuery(Name = "durum")]
+    private string? Durum { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private string? _sir;
+
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (HttpContext?.Request.Cookies[OneTimeSecretStash.CookieName] is { Length: > 0 } key)
+        {
+            _sir = Stash.Take(key);
+            HttpContext.Response.Cookies.Delete(OneTimeSecretStash.CookieName,
+                new CookieOptions { Path = "/webhooklar" });
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canWrite = Session.HasRank(TenantRole.Developer);
+        _endpoints = await Dispatcher.Ask(new ListWebhookEndpointsQuery());
+        _deliveries = await Dispatcher.Ask(new ListWebhookDeliveriesQuery(
+            null, string.IsNullOrEmpty(Durum) ? null : Durum, 50));
+    }
+
+    private static string StatusClass(string status) => status.ToLowerInvariant() switch
+    {
+        "delivered" => "ok",
+        "failed" => "err",
+        _ => "wait",
+    };
+
+    private static string StatusLabel(string status) => status.ToLowerInvariant() switch
+    {
+        "delivered" => "Teslim edildi",
+        "failed" => "Başarısız",
+        _ => "Bekliyor",
+    };
+
+    private static string Shorten(string value) => value.Length <= 90 ? value : value[..90] + "…";
+}

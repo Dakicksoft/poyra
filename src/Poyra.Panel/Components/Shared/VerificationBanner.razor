@@ -1,0 +1,35 @@
+@inherits OwningComponentBase
+@using Poyra.Modules.Tenancy.Features.Auth
+@using Poyra.SharedKernel.Tenancy
+@inject PanelPrincipalBinder Session
+
+@if (_show)
+{
+    <div class="alert warn banner" role="status">
+        <span>
+            <strong>@Session.Email</strong> adresi henüz doğrulanmadı —
+            kesinti alarmları ve mutabakat özetleri bu adrese gönderilmiyor.
+        </span>
+        <form method="post" action="/eposta-dogrula/gonder">
+            <AntiforgeryToken />
+            <button type="submit" class="link">Doğrulama bağlantısını yeniden gönder</button>
+        </form>
+    </div>
+}
+
+@code {
+    private bool _show;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Session.TenantId is not { } tenantId || Session.UserId is not { } userId)
+            return;
+
+        ScopedServices.GetRequiredService<TenantContext>().Set(tenantId);
+        ScopedServices.GetRequiredService<UserContext>()
+            .SetUser(userId, Session.Email, TenantRoleMap.FromDb[Session.Role]);
+
+        var me = await ScopedServices.GetRequiredService<IDispatcher>().Ask(new MeQuery());
+        _show = me is { EmailVerified: false };
+    }
+}

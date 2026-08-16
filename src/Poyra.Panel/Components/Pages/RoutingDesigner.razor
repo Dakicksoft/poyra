@@ -1,0 +1,517 @@
+@page "/rota"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inherits TenantScopedComponent
+@using System.Text.Json
+@using Poyra.Modules.Connectors.Features
+@using Poyra.Modules.Routing.Features
+@using Poyra.Panel.Routing
+@using Poyra.SharedKernel.Errors
+
+<PageTitle>Rota — Poyra</PageTitle>
+
+<h1>Rota kuralları</h1>
+<p class="muted">
+    Hangi işlemin hangi POS'a gideceğini burada belirlersiniz — ve yayına almadan önce
+    <strong>geçmiş işlemler üzerinde deneyip farkı görürsünüz</strong>.
+</p>
+
+@if (_message is { Length: > 0 })
+{
+    <div class="alert @_messageKind" role="@(_messageKind == "err" ? "alert" : "status")">@_message</div>
+}
+
+<h2>Yayındaki kural</h2>
+@if (_active is null)
+{
+    <p class="empty">Aktif kural yok — öncelik sırası uygulanıyor.</p>
+}
+else
+{
+    <div class="reason">
+        <p class="lead">@_active.Name <span class="hint">sürüm @_active.Version</span></p>
+        <pre class="payload wrap">@Pretty(_active.Document)</pre>
+    </div>
+}
+
+<h2>Hesaplar</h2>
+<ul class="catalog">
+    @foreach (var account in _accounts)
+    {
+        <li>
+            <strong>@account.Label</strong>
+            <span class="hint">öncelik @account.Priority</span>
+            <span class="badge @Fmt.HealthClass(account.Health)">@Fmt.Health(account.Health)</span>
+        </li>
+    }
+</ul>
+
+<h2>Kural taslağı</h2>
+<div class="card">
+    <div class="mode-switch">
+        <button type="button" class="@(_jsonMode ? "" : "active")" aria-pressed="@(!_jsonMode ? "true" : "false")"
+                @onclick="() => SwitchMode(false)" disabled="@(_model.Advanced)">
+            Görsel kurucu
+        </button>
+        <button type="button" class="@(_jsonMode ? "active" : "")" aria-pressed="@(_jsonMode ? "true" : "false")"
+                @onclick="() => SwitchMode(true)">
+            JSON
+        </button>
+    </div>
+
+    @if (_model.Advanced)
+    {
+        <div class="alert warn" role="status">
+            Bu kural görsel kurucunun ifade edebileceğinden karmaşık (iç içe koşul ya da
+            katalog dışı bir alan). Anlamını değiştirmemek için JSON kipinde bırakıldı.
+        </div>
+    }
+
+    @if (_jsonMode)
+    {
+        <label>
+            Kural (JSON)
+            <textarea rows="14" class="mono" @bind="_draft" @bind:event="oninput"></textarea>
+        </label>
+    }
+    else
+    {
+        <RuleBuilder Model="_model" Accounts="_accountLabels" Changed="OnBuilderChanged" />
+
+        <details class="json-peek">
+            <summary>Üretilen JSON</summary>
+            <pre class="payload">@_draft</pre>
+        </details>
+    }
+
+    <div class="actions">
+        <label class="inline-field">
+            Gün
+            <input type="number" @bind="_days" min="1" max="365" />
+        </label>
+        <button class="secondary" @onclick="SimulateAsync" disabled="@_busy">
+            @(_busy ? "Deneniyor…" : "Geçmişte dene (simüle et)")
+        </button>
+        @if (HasRank(TenantRole.Admin))
+        {
+            <input type="text" @bind="_ruleName" placeholder="Kural adı" aria-label="Kural adı" />
+            <button class="primary publish" @onclick="BeginPublish"
+                    disabled="@(_busy || _confirmingPublish)">Yayına al</button>
+        }
+    </div>
+
+    @if (_confirmingPublish)
+    {
+        <div class="alert warn" role="status">
+            <p>
+                <strong>'@_ruleName'</strong> yayına alınacak — @_draftRuleCount kural,
+                @_draftConditionCount koşul. Canlı trafiğe anında uygulanır.
+            </p>
+            @if (_simulation is { } lastSim)
+            {
+                <p>
+                    Son simülasyon: @lastSim.SampleSize işlemin @lastSim.ChangedCount tanesinin
+                    POS'u değişirdi, tahmini fark @Fmt.Money(lastSim.EstimatedSavingMinor, "TRY").
+                </p>
+            }
+            else
+            {
+                <p>
+                    <strong>Simüle etmeden yayınlıyorsunuz</strong> — kuralı önce geçmiş
+                    işlemler üzerinde denemeniz önerilir.
+                </p>
+            }
+            <div class="actions">
+                <button class="primary publish" @onclick="ConfirmPublishAsync" disabled="@_busy">
+                    Onayla ve yayına al
+                </button>
+                <button class="ghost" @onclick="CancelPublish" disabled="@_busy">Vazgeç</button>
+            </div>
+        </div>
+    }
+</div>
+
+@if (_simulation is { } sim)
+{
+    <h2>Simülasyon sonucu</h2>
+    <div class="tiles">
+        <div class="tile">
+            <span class="label">Örnek</span>
+            <span class="value">@sim.SampleSize</span>
+            <span class="sub">son @_days günün işlemleri</span>
+        </div>
+        <div class="tile">
+            <span class="label">POS değişimi</span>
+            <span class="value">@sim.ChangedCount</span>
+            <span class="sub">işlem başka POS'a giderdi</span>
+        </div>
+        <div class="tile @(sim.EstimatedSavingMinor > 0 ? "warn" : "")">
+            <span class="label">Komisyon farkı</span>
+            <span class="value">@Fmt.Money(sim.EstimatedSavingMinor, "TRY")</span>
+            <span class="sub">
+                @(sim.EstimatedSavingMinor > 0 ? "tasarruf" :
+                  sim.EstimatedSavingMinor < 0 ? "ek maliyet" : "fark yok")
+            </span>
+        </div>
+        <div class="tile">
+            <span class="label">Hesaplanamayan</span>
+            <span class="value">@sim.CostUnknownCount</span>
+            <span class="sub">anlaşma tanımsız</span>
+        </div>
+    </div>
+
+    @if (sim.Changes.Count > 0)
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ödeme</th>
+                        <th>Şu an</th>
+                        <th>Kural sonrası</th>
+                        <th class="num">Fark</th>
+                        <th>Neden</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var change in sim.Changes.Take(25))
+                    {
+                        <tr>
+                            <td class="mono">@Fmt.ShortId(change.PaymentId)</td>
+                            <td>@change.FromAccount</td>
+                            <td>@change.ToAccount</td>
+                            <td class="num mono @(change.SavingMinor > 0 ? "" : "warn-text")">
+                                @Fmt.Money(change.SavingMinor ?? 0, "TRY")
+                            </td>
+                            <td class="hint">@change.Reason</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (sim.Changes.Count > 25)
+        {
+            <p class="hint">25 / @sim.Changes.Count değişiklik gösteriliyor.</p>
+        }
+    }
+}
+
+<h2>Sürüm geçmişi</h2>
+@if (_rules.Count == 0)
+{
+    <p class="empty">Kayıtlı kural sürümü yok.</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Ad</th>
+                    <th class="num">Sürüm</th>
+                    <th>Durum</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var rule in _rules)
+                {
+                    <tr>
+                        <td>@rule.Name</td>
+                        <td class="num mono">v@(rule.Version)</td>
+                        <td>
+                            @if (rule.IsActive)
+                            {
+                                <span class="badge ok">Aktif</span>
+                            }
+                            else
+                            {
+                                <span class="badge muted">Pasif</span>
+                            }
+                        </td>
+                        <td class="row-actions">
+                            @if (!rule.IsActive && HasRank(TenantRole.Admin))
+                            {
+                                <button type="button" class="link" disabled="@_busy"
+                                        @onclick="() => BeginActivate(rule.Id)">Aktive et</button>
+                            }
+                        </td>
+                    </tr>
+                    @if (_confirmingActivate == rule.Id)
+                    {
+                        <tr>
+                            <td colspan="4">
+                                <div class="alert warn" role="status">
+                                    '@rule.Name' sürüm @rule.Version aktive edilecek — yayındaki
+                                    kuralın yerini alır ve canlı trafiğe anında uygulanır.
+                                    <div class="actions">
+                                        <button class="primary" disabled="@_busy"
+                                                @onclick="() => ConfirmActivateAsync(rule.Id)">
+                                            Onayla ve aktive et
+                                        </button>
+                                        <button class="ghost" @onclick="CancelActivate" disabled="@_busy">
+                                            Vazgeç
+                                        </button>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private const string DefaultDraft = """
+        {
+          "strategy": "cheapest",
+          "rules": [
+            {
+              "name": "on-us",
+              "reason": "Kart bankası = POS bankası",
+              "when": { "fact": "card.bank", "op": "eq", "value": "0062" },
+              "route": ["Garanti POS"]
+            }
+          ],
+          "guards": { "skipUnhealthy": true, "maxAttempts": 3 }
+        }
+        """;
+
+    private RoutingRuleResponse? _active;
+    private IReadOnlyList<RoutingRuleResponse> _rules = [];
+    private IReadOnlyList<ConnectorAccountResponse> _accounts = [];
+    private IReadOnlyList<string> _accountLabels = [];
+    private SimulationResultDto? _simulation;
+    private RuleBuilderModel _model = new();
+    private string _draft = DefaultDraft;
+    private string _ruleName = "ana-kural";
+    private int _days = 30;
+    private string? _message;
+    private string _messageKind = "ok";
+    private bool _busy;
+    private bool _jsonMode;
+    private bool _confirmingPublish;
+    private Guid? _confirmingActivate;
+    private int _draftRuleCount;
+    private int _draftConditionCount;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        if (!await EnsureTenantAsync())
+            return;
+
+        _active = await Dispatcher.Ask(new GetActiveRuleQuery());
+        _rules = await Dispatcher.Ask(new ListRoutingRulesQuery());
+        _accounts = await Dispatcher.Ask(new ListConnectorAccountsQuery());
+        _accountLabels = _accounts.Select(a => a.Label).ToList();
+
+        if (_active is not null && _simulation is null)
+            _draft = Pretty(_active.Document);
+
+        SyncModelFromDraft();
+    }
+
+    private void SyncModelFromDraft()
+    {
+        try
+        {
+            _model = RuleBuilderModel.FromJson(JsonDocument.Parse(_draft).RootElement);
+        }
+        catch (JsonException)
+        {
+            _model = new RuleBuilderModel();
+            _jsonMode = true;
+            return;
+        }
+
+        if (_model.Advanced)
+            _jsonMode = true;
+    }
+
+    private void SwitchMode(bool json)
+    {
+        if (json)
+        {
+            if (!_jsonMode)
+                _draft = Pretty(_model.ToJson());
+        }
+        else
+        {
+            SyncModelFromDraft();
+            if (_model.Advanced)
+                return;
+        }
+
+        _jsonMode = json;
+    }
+
+    private void OnBuilderChanged() => _draft = Pretty(_model.ToJson());
+
+    private async Task SimulateAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (!await EnsureTenantAsync() || !TryParseDraft(out var document))
+                return;
+
+            _simulation = await Dispatcher.Ask(new SimulateRoutingQuery(document, _days, 1000));
+            _message = $"{_simulation.SampleSize} işlem denendi — hiçbir şey değiştirilmedi (salt okuma).";
+            _messageKind = "ok";
+        }
+        catch (Exception ex) when (ex is PoyraException or FluentValidation.ValidationException)
+        {
+            _message = ex.Message;
+            _messageKind = "err";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void BeginPublish()
+    {
+        _message = null;
+        if (!TryParseDraft(out var document))
+            return;
+
+        if (!HasRank(TenantRole.Admin))
+        {
+            _message = "Kural yayınlamak için 'admin' rolü gerekli.";
+            _messageKind = "err";
+            return;
+        }
+
+        (_draftRuleCount, _draftConditionCount) = CountDraft(document);
+        _confirmingPublish = true;
+    }
+
+    private void CancelPublish() => _confirmingPublish = false;
+
+    private async Task ConfirmPublishAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (!await EnsureTenantAsync() || !TryParseDraft(out var document))
+                return;
+
+            if (!HasRank(TenantRole.Admin))
+            {
+                _message = "Kural yayınlamak için 'admin' rolü gerekli.";
+                _messageKind = "err";
+                return;
+            }
+
+            var created = await Dispatcher.Send(new CreateRoutingRuleCommand(_ruleName, document));
+            await Dispatcher.Send(new ActivateRoutingRuleCommand(created.Id));
+            _confirmingPublish = false;
+            await LoadAsync();
+
+            _message = $"'{created.Name}' sürüm {created.Version} yayına alındı. "
+                       + "Önceki sürüm silinmedi — sürüm geçmişinden geri dönebilirsiniz.";
+            _messageKind = "ok";
+        }
+        catch (Exception ex) when (ex is PoyraException or FluentValidation.ValidationException)
+        {
+            _message = ex.Message;
+            _messageKind = "err";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void BeginActivate(Guid ruleId)
+    {
+        _message = null;
+        _confirmingActivate = ruleId;
+    }
+
+    private void CancelActivate() => _confirmingActivate = null;
+
+    private async Task ConfirmActivateAsync(Guid ruleId)
+    {
+        _busy = true;
+        try
+        {
+            if (!await EnsureTenantAsync())
+                return;
+
+            if (!HasRank(TenantRole.Admin))
+            {
+                _message = "Kural aktive etmek için 'admin' rolü gerekli.";
+                _messageKind = "err";
+                return;
+            }
+
+            var activated = await Dispatcher.Send(new ActivateRoutingRuleCommand(ruleId));
+            _confirmingActivate = null;
+            await LoadAsync();
+
+            _message = $"'{activated.Name}' sürüm {activated.Version} yeniden aktive edildi.";
+            _messageKind = "ok";
+        }
+        catch (Exception ex) when (ex is PoyraException or FluentValidation.ValidationException)
+        {
+            _message = ex.Message;
+            _messageKind = "err";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private bool TryParseDraft(out JsonElement document)
+    {
+        try
+        {
+            document = JsonDocument.Parse(_draft).RootElement.Clone();
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            _message = $"Kural JSON'u geçersiz: {ex.Message}";
+            _messageKind = "err";
+            document = default;
+            return false;
+        }
+    }
+
+    private static (int Rules, int Conditions) CountDraft(JsonElement document)
+    {
+        if (!document.TryGetProperty("rules", out var rules) || rules.ValueKind != JsonValueKind.Array)
+            return (0, 0);
+
+        var conditions = 0;
+        foreach (var rule in rules.EnumerateArray())
+            if (rule.ValueKind == JsonValueKind.Object && rule.TryGetProperty("when", out var when))
+                conditions += CountLeafConditions(when);
+
+        return (rules.GetArrayLength(), conditions);
+    }
+
+    private static int CountLeafConditions(JsonElement node) => node.ValueKind switch
+    {
+        JsonValueKind.Object when node.TryGetProperty("fact", out _) => 1,
+        JsonValueKind.Object => node.EnumerateObject().Sum(p => CountLeafConditions(p.Value)),
+        JsonValueKind.Array => node.EnumerateArray().Sum(CountLeafConditions),
+        _ => 0,
+    };
+
+    private static readonly JsonSerializerOptions PrettyOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Create(
+            System.Text.Unicode.UnicodeRanges.All),
+    };
+
+    private static string Pretty(JsonElement element) => JsonSerializer.Serialize(element, PrettyOptions);
+}

@@ -1,0 +1,53 @@
+@page "/giris/dogrulama"
+@layout AuthLayout
+@using Microsoft.AspNetCore.Components.Web
+@attribute [AllowAnonymous]
+
+<PageTitle>İki adımlı doğrulama — Poyra</PageTitle>
+
+<div class="login">
+    <h2 class="auth-title">İki adımlı doğrulama</h2>
+    <p class="auth-lead">
+        Telefonunuzdaki doğrulama uygulamasından (Google Authenticator, Authy…)
+        6 haneli kodu girin.
+    </p>
+
+    @if (!string.IsNullOrEmpty(Hata))
+    {
+        <div class="alert err" role="alert">@ErrorText(Hata)</div>
+    }
+
+    <form method="post" action="/giris/dogrulama" class="card">
+        <AntiforgeryToken />
+        <label>
+            Doğrulama kodu
+            <input type="text" name="kod" inputmode="numeric" autocomplete="one-time-code"
+                   pattern="[0-9]{6}|[0-9]{5}-[0-9]{5}" maxlength="11" required autofocus
+                   placeholder="000000" />
+        </label>
+
+        <label class="check">
+            <input type="checkbox" name="cihaz" value="1" />
+            Bu cihazı 30 gün hatırla
+        </label>
+
+        <button type="submit" class="primary">Doğrula ve giriş yap</button>
+    </form>
+
+    <p class="hint">
+        Telefonunuza erişemiyorsanız kurtarma kodlarınızdan birini
+        (örn. <span class="mono">84213-90711</span>) kod alanına yazabilirsiniz.
+    </p>
+    <p class="login-links"><a href="/giris">← Girişe dön</a></p>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private static string ErrorText(string code) => code switch
+    {
+        "kod-gecersiz" => "Kod doğrulanamadı. Uygulamadaki güncel kodu ya da bir kurtarma kodunu girin.",
+        _ => "Doğrulama tamamlanamadı. Lütfen tekrar deneyin.",
+    };
+}

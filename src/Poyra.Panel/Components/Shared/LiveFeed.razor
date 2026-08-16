@@ -1,0 +1,96 @@
+@rendermode InteractiveServer
+@inherits TenantScopedComponent
+@using Poyra.Modules.Payments.Features.ListPayments
+@using Poyra.SharedKernel.Notifications
+@inject INotificationStream Stream
+
+@if (_alert is { Length: > 0 })
+{
+    <div class="alert @(_alertOk ? "ok" : "warn")" role="status">@_alert</div>
+}
+
+<div class="live-head">
+    <h2>Son işlemler</h2>
+    <span class="live-badge @(_connected ? "on" : "")">
+        @(_connected ? "canlı" : "bağlanıyor…")
+        @if (_lastRefresh is { } t)
+        {
+            <span class="hint">· @t.ToOffset(TimeSpan.FromHours(3)).ToString("HH:mm:ss")</span>
+        }
+    </span>
+    <a class="more" href="/odemeler">Tümü →</a>
+</div>
+
+<PaymentTable Items="_items" />
+
+@code {
+
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
+    private IReadOnlyList<PaymentListItemDto> _items = [];
+    private string? _alert;
+    private bool _alertOk;
+    private bool _connected;
+    private DateTimeOffset? _lastRefresh;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!await EnsureTenantAsync())
+            return;
+
+        await RefreshAsync();
+        Stream.Received += OnNotification;
+        _connected = true;
+    }
+
+    private async Task RefreshAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            if (!await EnsureTenantAsync())
+                return;
+
+            _items = await Dispatcher.Ask(new ListPaymentsQuery(Status: null, Limit: 15, Before: null));
+            _lastRefresh = DateTimeOffset.UtcNow;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private void OnNotification(PoyraNotification notification)
+    {
+        if (notification.TenantId != TenantId)
+            return;
+
+        _ = InvokeAsync(async () =>
+        {
+            if (notification.Type == PoyraNotificationTypes.ConnectorHealthChanged)
+            {
+                _alertOk = notification.Detail != "down";
+                _alert = _alertOk
+                    ? $"{notification.EntityId} yeniden sağlıklı."
+                    : $"{notification.EntityId} erişilemiyor — trafik diğer POS'lara yönlendiriliyor.";
+            }
+            else
+            {
+                await RefreshAsync();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Stream.Received -= OnNotification;
+            _gate.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+}

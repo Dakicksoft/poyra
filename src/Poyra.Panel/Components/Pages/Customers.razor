@@ -1,0 +1,149 @@
+@page "/musteriler"
+@attribute [Authorize]
+@using Poyra.Modules.Customers.Features
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>Müşteriler — Poyra</PageTitle>
+
+<h1>Müşteriler</h1>
+<p class="lead">
+    Anahtar <strong>sizin müşteri referansınızdır</strong> — ödemede, Kasa'da ve
+    abonelikte gönderdiğiniz <span class="mono">customerRef</span>. Kayıt sonradan
+    açılsa bile geçmiş ödemeler kendiliğinden bağlanır.
+</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+<form method="get" class="filters">
+    <label>
+        Ara (referans, ad, e-posta)
+        <input type="search" name="ara" value="@Ara" placeholder="Örn. cust-1024 / Ayşe" />
+    </label>
+    <button type="submit" class="ghost">Ara</button>
+</form>
+
+@if (_customers.Count == 0)
+{
+    @if (string.IsNullOrWhiteSpace(Ara))
+    {
+        <div class="empty-state">
+            <p class="es-title">Kayıtlı müşteri yok</p>
+            <p class="es-hint">
+                Müşteri, <span class="mono">PUT /v1/customers/{ref}</span> ile ya da aşağıdaki
+                formla kaydedilir — geçmiş ödemeler <span class="mono">customerRef</span>
+                üzerinden kendiliğinden bağlanır.
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="empty-state">
+            <p class="es-title">Eşleşen müşteri yok</p>
+            <p class="es-hint"><a href="/musteriler">Aramayı temizle</a> — tüm müşterileri gör.</p>
+        </div>
+    }
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Referans</th>
+                    <th>Ad</th>
+                    <th>E-posta</th>
+                    <th>Telefon</th>
+                    <th>Kayıt</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var customer in _customers)
+                {
+                    <tr class="@(customer.Erased ? "muted-row" : "")">
+                        <td class="mono">
+                            <a href="/musteriler/@customer.Ref" title="@customer.Ref">@Fmt.ShortId(customer.Ref, 24)</a>
+                        </td>
+                        <td>
+                            @(customer.Name ?? "—")
+                            @if (customer.Erased)
+                            {
+                                <span class="badge muted">KVKK silindi</span>
+                            }
+                        </td>
+                        <td>@(customer.Email ?? "—")</td>
+                        <td class="mono">@(customer.Phone ?? "—")</td>
+                        <td class="mono">@Fmt.Date(customer.CreatedAt)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (_customers.Count >= ListeLimiti)
+    {
+        <p class="hint">
+            İlk @ListeLimiti kayıt gösteriliyor — devamı listelenmez, aramayla daraltın.
+        </p>
+    }
+}
+
+@if (_canWrite)
+{
+    <h3>Müşteri kaydet</h3>
+    <form method="post" action="/musteriler/kaydet" class="filters">
+        <AntiforgeryToken />
+        <label>
+            Referans
+            <input type="text" name="ref" required maxlength="100" placeholder="Örn. cust-1024" />
+        </label>
+        <label>
+            Ad soyad
+            <input type="text" name="name" maxlength="200" />
+        </label>
+        <label>
+            E-posta
+            <input type="email" name="email" maxlength="320" />
+        </label>
+        <label>
+            Cep telefonu
+            <input type="tel" name="phone" placeholder="0532 123 45 67" />
+        </label>
+        <button type="submit" class="primary">Kaydet</button>
+    </form>
+    <p class="hint">
+        Ad, e-posta ve telefon <strong>kişisel veridir</strong> (KVKK). Yalnız
+        gerçekten ihtiyacınız olanı girin — silme talebi geldiğinde bu alanlar
+        temizlenir, mali kayıt kalır.
+    </p>
+}
+
+@code {
+    private const int ListeLimiti = 200;
+
+    private IReadOnlyList<CustomerDto> _customers = [];
+    private bool _canWrite;
+
+    [SupplyParameterFromQuery(Name = "ara")]
+    private string? Ara { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canWrite = Session.HasRank(TenantRole.Operations);
+        _customers = await Dispatcher.Ask(new ListCustomersQuery(
+            string.IsNullOrWhiteSpace(Ara) ? null : Ara.Trim(), ListeLimiti));
+    }
+}

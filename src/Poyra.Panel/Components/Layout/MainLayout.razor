@@ -1,0 +1,68 @@
+@inherits LayoutComponentBase
+@inject PanelPrincipalBinder Session
+
+<div class="shell">
+    <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-hidden="true" />
+
+    <header class="topbar">
+        <label for="nav-toggle" class="nav-burger" role="button" aria-label="Menüyü aç veya kapat">
+            <span></span><span></span><span></span>
+        </label>
+        <div class="brand">
+            <span class="hub" aria-hidden="true"></span>
+            <span class="wordmark">poyra</span>
+        </div>
+    </header>
+
+    <aside class="side">
+        <div class="brand">
+            <span class="hub" aria-hidden="true"></span>
+            <span class="wordmark">poyra</span>
+        </div>
+
+        <nav aria-label="Ana gezinme">
+            <NavLink href="/" Match="NavLinkMatch.All">Genel Bakış</NavLink>
+
+            <span class="nav-group">Tahsilat</span>
+            <NavLink href="/odemeler">Ödemeler</NavLink>
+            <NavLink href="/baglantilar-odeme">Ödeme Linkleri</NavLink>
+            <NavLink href="/abonelikler">Abonelikler</NavLink>
+            <NavLink href="/musteriler">Müşteriler</NavLink>
+            <NavLink href="/saha">Saha</NavLink>
+
+            <span class="nav-group">Para</span>
+            <NavLink href="/alacaklar">Alacaklar</NavLink>
+            <NavLink href="/mutabakat">Mutabakat</NavLink>
+            <NavLink href="/itirazlar">İtirazlar</NavLink>
+
+            <span class="nav-group">Orkestrasyon</span>
+            <NavLink href="/rota">Rota</NavLink>
+            <NavLink href="/risk">Risk</NavLink>
+            <NavLink href="/analiz">Analiz</NavLink>
+            <NavLink href="/baglantilar">POS Bağlantıları</NavLink>
+
+            <span class="nav-group">Yönetim</span>
+            <NavLink href="/webhooklar">Webhook'lar</NavLink>
+            <NavLink href="/uyum">Uyum</NavLink>
+            <NavLink href="/ekip">Ekip</NavLink>
+            <NavLink href="/guvenlik">Güvenlik</NavLink>
+            <NavLink href="/ayarlar">Ayarlar</NavLink>
+        </nav>
+
+        <div class="session">
+            <div class="tenant">@Session.TenantName</div>
+            <div class="user">@Session.Email <span class="role">@Session.Role</span></div>
+            <form method="post" action="/cikis">
+                <AntiforgeryToken />
+                <button type="submit" class="link">Çıkış</button>
+            </form>
+        </div>
+    </aside>
+
+    <label for="nav-toggle" class="nav-scrim" aria-hidden="true"></label>
+
+    <main>
+        <VerificationBanner />
+        @Body
+    </main>
+</div>

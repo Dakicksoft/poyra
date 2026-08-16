@@ -1,0 +1,16 @@
+<Project>
+
+  <!-- Kökteki Directory.Build.props'u elle içeri al: MSBuild yalnız EN YAKIN dosyayı
+       otomatik bulur, bu dosya eklendiği an kökteki devre dışı kalırdı. -->
+  <Import Project="$(MSBuildThisFileDirectory)../Directory.Build.props" />
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kapsam toplayıcı her test projesinde olmalı; koşum için ./scripts/test-kapsam.sh -->
+    <PackageReference Include="coverlet.collector" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

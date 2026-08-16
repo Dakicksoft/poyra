@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Poyra.SharedKernel\Poyra.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Poyra.Persistence\Poyra.Persistence.csproj" />
+    <!-- Yalnız Contracts: müşterinin ödemeleri, kartları ve abonelikleri okunur -->
+    <ProjectReference Include="..\Poyra.Modules.Payments\Poyra.Modules.Payments.csproj" />
+    <ProjectReference Include="..\Poyra.Modules.Vault\Poyra.Modules.Vault.csproj" />
+    <ProjectReference Include="..\Poyra.Modules.Subscriptions\Poyra.Modules.Subscriptions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FastEndpoints" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

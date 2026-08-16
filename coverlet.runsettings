@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kapsam ölçümü ayarları. Koşum: ./scripts/test-kapsam.sh
+  (Bu dosya XML'dir; yorum içinde ard arda iki tire KULLANMAYIN, dosya bozulur
+   ve vstest ayarları sessizce yok sayıp yine de 0 ile çıkar.)
+
+  Ölçüm dışı bırakılanlar ve GEREKÇELERİ:
+   - Test projeleri: kendi kendini ölçmek anlamsız.
+   - EF migration'ları: araç üretimi; "test edilmemiş" sayılması tabloyu yanıltır.
+   - *DbContextFactory: IDesignTimeDbContextFactory, yalnız 'dotnet ef' aracı çağırır;
+     üretimde hiç çalışmaz. Ölçüme girerse 12 sınıf sürekli %0 görünüp sinyali bozar.
+   - Derleyici üretimi kod (record Equals, iterator state machine, [ExcludeFromCodeCoverage]).
+  Razor bileşenleri BİLEREK ölçüme dahildir — panel 10k satır ve entegrasyon
+  testleri onu gerçekten çalıştırıyor; dışlarsak panelin durumu görünmez olur.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Include>[Poyra.*]*</Include>
+          <Exclude>[Poyra.Tests.*]*,[Poyra.*]*DbContextFactory</Exclude>
+          <ExcludeByFile>**/Migrations/*.cs</ExcludeByFile>
+          <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute,ObsoleteAttribute</ExcludeByAttribute>
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+          <SkipAutoProps>true</SkipAutoProps>
+          <UseSourceLink>false</UseSourceLink>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

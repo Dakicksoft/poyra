@@ -1,0 +1,211 @@
+@page "/itirazlar"
+@attribute [Authorize]
+@using Poyra.Modules.Disputes.Features
+@inject IDispatcher Dispatcher
+
+<PageTitle>İtirazlar — Poyra</PageTitle>
+
+<h1>Harcama itirazları</h1>
+<p class="lead">
+    Kaçırılan kanıt süresi — savunma ne kadar güçlü olursa olsun — <strong>otomatik
+    kayıptır</strong>. Bu ekran "hangi dosya yanıyor" sorusuna göre sıralanır.
+</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+@if (_burning.Count > 0)
+{
+    <div class="alert err" role="alert">
+        <strong>@_burning.Count dosyanın süresi 3 günden az</strong> —
+        toplam @MixedSum(_burning) risk altında.
+    </div>
+}
+
+<div class="tiles">
+    <div class="tile @(_open.Count > 0 ? "warn" : "")">
+        <span class="label">Açık dosya</span>
+        <span class="value">@_open.Count</span>
+        <span class="sub">@TrySum(_open) savunmada</span>
+        @foreach (var other in OtherSums(_open))
+        {
+            <span class="sub">@other</span>
+        }
+    </div>
+    <div class="tile">
+        <span class="label">İncelemede</span>
+        <span class="value">@_underReview</span>
+        <span class="sub">banka kararı bekleniyor</span>
+    </div>
+    <div class="tile">
+        <span class="label">Kazanılan</span>
+        <span class="value">@_won.Count</span>
+        <span class="sub">@TrySum(_won) geri alındı</span>
+        @foreach (var other in OtherSums(_won))
+        {
+            <span class="sub">@other</span>
+        }
+    </div>
+    <div class="tile">
+        <span class="label">Kaybedilen</span>
+        <span class="value">@_lost.Count</span>
+        <span class="sub">@TrySum(_lost) müşteride kaldı</span>
+        @foreach (var other in OtherSums(_lost))
+        {
+            <span class="sub">@other</span>
+        }
+    </div>
+</div>
+
+<form method="get" class="filters">
+    <label>
+        Durum
+        <select name="durum">
+            <option value="">Tümü</option>
+            @foreach (var status in StatusFilters)
+            {
+                <option value="@status" selected="@(Durum == status)">@DisputeText.Status(status)</option>
+            }
+        </select>
+    </label>
+    <label>
+        Süresi içinde dolacak
+        <select name="saat">
+            <option value="">Sınırsız</option>
+            <option value="24" selected="@(Saat == "24")">24 saat</option>
+            <option value="72" selected="@(Saat == "72")">3 gün</option>
+            <option value="168" selected="@(Saat == "168")">7 gün</option>
+        </select>
+    </label>
+    <button type="submit" class="ghost">Filtrele</button>
+</form>
+
+@if (_disputes.Count == 0)
+{
+    @if (HasFilter)
+    {
+        <div class="empty-state">
+            <p class="es-title">Filtreyle eşleşen dosya yok</p>
+            <p class="es-hint"><a href="/itirazlar">Filtreleri temizle</a> — tüm dosyaları gör.</p>
+        </div>
+    }
+    else
+    {
+        <div class="empty-state">
+            <p class="es-title">Kayıt yok — bu iyi haber.</p>
+            <p class="es-hint">Banka bir itiraz bildirdiğinde dosya burada açılır ve kanıt süresi işlemeye başlar.</p>
+        </div>
+    }
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Dosya</th>
+                    <th>Kalan süre</th>
+                    <th>Ödeme</th>
+                    <th class="num">Tutar</th>
+                    <th>Neden</th>
+                    <th class="hide-narrow">Kademe</th>
+                    <th>Durum</th>
+                    <th class="num hide-narrow">Belge</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var dispute in _disputes)
+                {
+                    <tr>
+                        <td class="mono"><a href="/itirazlar/@dispute.Id" title="@dispute.Id">@Fmt.ShortId(dispute.Id)</a></td>
+                        <td>
+                            <span class="badge @DisputeText.RemainingClass(dispute)">
+                                @DisputeText.Remaining(dispute)
+                            </span>
+                            <div class="hint mono">@Fmt.Date(dispute.EvidenceDueAt)</div>
+                        </td>
+                        <td class="mono"><a href="/odemeler/@dispute.PaymentId" title="@dispute.PaymentId">@Fmt.ShortId(dispute.PaymentId)</a></td>
+                        <td class="num mono">@Fmt.Money(dispute.AmountMinor, dispute.Currency)</td>
+                        <td>@DisputeText.Reason(dispute.Reason)</td>
+                        <td class="hide-narrow">@DisputeText.Stage(dispute.Stage)</td>
+                        <td>
+                            <span class="badge @DisputeText.StatusClass(DisputeText.Effective(dispute))">
+                                @DisputeText.Status(DisputeText.Effective(dispute))
+                            </span>
+                        </td>
+                        <td class="num hide-narrow">@dispute.EvidenceCount</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private static readonly string[] StatusFilters =
+        ["open", "under_review", "won", "lost", "accepted", "expired"];
+
+    private IReadOnlyList<DisputeResponse> _disputes = [];
+    private IReadOnlyList<DisputeResponse> _all = [];
+    private List<DisputeResponse> _open = [];
+    private List<DisputeResponse> _burning = [];
+    private List<DisputeResponse> _won = [];
+    private List<DisputeResponse> _lost = [];
+    private int _underReview;
+
+    [SupplyParameterFromQuery(Name = "durum")]
+    private string? Durum { get; set; }
+
+    [SupplyParameterFromQuery(Name = "saat")]
+    private string? Saat { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private bool HasFilter => !string.IsNullOrEmpty(Durum) || !string.IsNullOrEmpty(Saat);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _disputes = await Dispatcher.Ask(new ListDisputesQuery(
+            string.IsNullOrEmpty(Durum) ? null : Durum,
+            null,
+            int.TryParse(Saat, out var hours) ? hours : null));
+
+        _all = HasFilter
+            ? await Dispatcher.Ask(new ListDisputesQuery(null, null, null))
+            : _disputes;
+
+        _open = _all.Where(d => DisputeText.Effective(d) == "open").ToList();
+        _burning = _open.Where(d => d.RemainingHours is > 0 and < 72).ToList();
+        _underReview = _all.Count(d => d.Status == "under_review");
+        _won = _all.Where(d => d.Status == "won").ToList();
+
+        _lost = _all.Where(d => DisputeText.Effective(d) is "lost" or "expired" or "accepted").ToList();
+    }
+
+    private static string TrySum(IReadOnlyCollection<DisputeResponse> items)
+        => Fmt.Money(items.Where(d => d.Currency == "TRY").Sum(d => d.AmountMinor), "TRY");
+
+    private static List<string> OtherSums(IReadOnlyCollection<DisputeResponse> items)
+        => items.Where(d => d.Currency != "TRY")
+            .GroupBy(d => d.Currency)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => $"+ {Fmt.Money(g.Sum(d => d.AmountMinor), g.Key)} ({g.Count()} dosya)")
+            .ToList();
+
+    private static string MixedSum(IReadOnlyCollection<DisputeResponse> items)
+    {
+        var parts = new List<string> { TrySum(items) };
+        parts.AddRange(OtherSums(items));
+        return string.Join(" ", parts);
+    }
+}

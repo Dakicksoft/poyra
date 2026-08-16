@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.INTERNET" />
+  <!-- Senkrondan önce "ağ var mı" sorusunu sorabilmek için -->
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+  <application android:allowBackup="false"
+               android:networkSecurityConfig="@xml/network_security_config"
+               android:supportsRtl="true">
+    <!--
+      allowBackup=false: kuyruk tahsilat verisi taşır ve cihaz yedeğine (bulut)
+      çıkmamalıdır. Yedekten dönen eski bir kuyruk, ödenmiş tahsilatları yeniden
+      göndermeye çalışırdı — clientOpId tekilliği bunu sunucuda yakalar ama veri
+      hiç oraya gitmemeli.
+    -->
+  </application>
+</manifest>

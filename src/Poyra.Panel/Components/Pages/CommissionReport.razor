@@ -1,0 +1,205 @@
+@page "/mutabakat/{StatementId:guid}"
+@attribute [Authorize]
+@using Poyra.Modules.Recon.Features
+@inject IDispatcher Dispatcher
+
+<PageTitle>Komisyon denetimi — Poyra</PageTitle>
+
+@if (_report is null)
+{
+    <p class="crumb"><a href="/mutabakat">← Mutabakat</a></p>
+    <h1>Ekstre bulunamadı</h1>
+    <p class="muted">
+        Bu adresteki ekstre bu hesapta yok — bağlantı eski ya da hatalı olabilir.
+        Yüklü ekstrelerin listesi Mutabakat sayfasındadır.
+    </p>
+}
+else
+{
+    <p class="crumb"><a href="/mutabakat">← Mutabakat</a></p>
+    <h1>Komisyon denetimi — @Fmt.DateOnly(_report.StatementDate)</h1>
+
+    @if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+    {
+        <div class="alert err" role="alert">@hataMesaj</div>
+    }
+
+    <p class="actions">
+        <a class="ghost" href="/mutabakat/@StatementId/erp">Muhasebe fişini indir</a>
+        <a class="link" href="/mutabakat/@StatementId/erp?format=logo_csv">Logo</a>
+        <a class="link" href="/mutabakat/@StatementId/erp?format=mikro_csv">Mikro</a>
+    </p>
+    <p class="hint">
+        Gün sonu fişi muhasebe programına doğrudan aktarılır; Logo ve Mikro bağlantıları
+        o biçimde CSV indirir, varsayılan biçim Ayarlar'dan seçilir.
+    </p>
+
+    <div class="tiles">
+        <div class="tile">
+            <span class="label">Beklenen komisyon</span>
+            <span class="value">@Fmt.Money(_report.ExpectedCommissionSum, "TRY")</span>
+            <span class="sub">anlaşma oranından</span>
+        </div>
+        <div class="tile">
+            <span class="label">Bankanın kestiği</span>
+            <span class="value">@Fmt.Money(_report.ActualCommissionSum, "TRY")</span>
+        </div>
+        <div class="tile">
+            <span class="label">Fark</span>
+            <span class="value @(_report.DeltaSum > 0 ? "err-text" : _report.DeltaSum < 0 ? "ok-text" : "")">
+                @Fmt.Money(_report.DeltaSum, "TRY")
+            </span>
+            <span class="sub @(_report.DeltaSum > 0 ? "err-text" : _report.DeltaSum < 0 ? "ok-text" : "")">
+                @(_report.DeltaSum > 0
+                    ? $"{_report.OverchargedCount} işlemde fazla kesim — itiraz edilebilir"
+                    : _report.DeltaSum < 0
+                        ? $"{_report.UnderchargedCount} işlemde eksik kesim"
+                        : "fark yok")
+            </span>
+        </div>
+        <div class="tile @(_report.AgreementMissingCount > 0 ? "warn" : "")">
+            <span class="label">Denetlenemeyen</span>
+            <span class="value">@_report.AgreementMissingCount</span>
+            <span class="sub">anlaşma tanımsız — "fark yok" değil</span>
+        </div>
+    </div>
+
+    @if (_valor is { LateCount: > 0 })
+    {
+        <div class="alert warn" role="status">
+            Valör: @_valor.LateCount işlem geç hesaba geçmiş (toplam @_valor.TotalLateDays gün gecikme).
+        </div>
+    }
+
+    <h2>Uyuşmazlıklar</h2>
+    @if (_report.Discrepancies.Count == 0)
+    {
+        <p class="empty">Kuruşuna kadar uyumlu — itiraz gerektiren satır yok.</p>
+    }
+    else
+    {
+        var auditedRows = _report.Discrepancies.Where(f => f.ExpectedCommissionMinor is not null).ToList();
+        var unauditedRowCount = _report.Discrepancies.Count - auditedRows.Count;
+        var grossTotal = _report.Discrepancies.Sum(f => f.GrossMinor);
+        var expectedTotal = auditedRows.Sum(f => f.ExpectedCommissionMinor!.Value);
+        var actualTotal = _report.Discrepancies.Sum(f => f.ActualCommissionMinor);
+        var deltaTotal = auditedRows.Sum(f => f.DeltaMinor ?? 0);
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sipariş</th>
+                        <th>Taksit</th>
+                        <th class="num">Brüt</th>
+                        <th class="num">Anlaşma</th>
+                        <th class="num">Beklenen</th>
+                        <th class="num">Kesilen</th>
+                        <th class="num">Fark</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var finding in _report.Discrepancies)
+                    {
+                        <tr class="@(finding.ExpectedCommissionMinor is null ? "muted-row" : "")">
+                            <td class="mono">@finding.OrderId</td>
+                            <td>@(finding.Installments > 1 ? $"{finding.Installments}x" : "Tek")</td>
+                            <td class="num mono">@Fmt.Money(finding.GrossMinor, "TRY")</td>
+                            <td class="num">
+                                @if (finding.AgreedRateBps is { } bps)
+                                {
+                                    @Fmt.RateBps(bps)
+                                }
+                                else
+                                {
+                                    <span class="hint" title="Bu satır için anlaşma oranı tanımlı değil — beklenen komisyon ve fark hesaplanamaz">anlaşma tanımsız</span>
+                                }
+                            </td>
+                            <td class="num mono">
+                                @(finding.ExpectedCommissionMinor is { } expected ? Fmt.Money(expected, "TRY") : "—")
+                            </td>
+                            <td class="num mono">@Fmt.Money(finding.ActualCommissionMinor, "TRY")</td>
+                            @if (finding.DeltaMinor is { } delta)
+                            {
+                                <td class="num mono @(delta > 0 ? "err-text" : delta < 0 ? "ok-text" : "")">
+                                    @Fmt.Money(delta, "TRY")
+                                </td>
+                            }
+                            else
+                            {
+                                <td class="num">—</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td><strong>Toplam</strong> — @_report.Discrepancies.Count satır</td>
+                        <td></td>
+                        <td class="num mono"><strong>@Fmt.Money(grossTotal, "TRY")</strong></td>
+                        <td></td>
+                        <td class="num mono"><strong>@Fmt.Money(expectedTotal, "TRY")</strong></td>
+                        <td class="num mono"><strong>@Fmt.Money(actualTotal, "TRY")</strong></td>
+                        <td class="num mono @(deltaTotal > 0 ? "err-text" : deltaTotal < 0 ? "ok-text" : "")">
+                            <strong>@Fmt.Money(deltaTotal, "TRY")</strong>
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        @if (unauditedRowCount > 0)
+        {
+            <p class="hint">
+                @unauditedRowCount satırda anlaşma tanımsız — bu satırlar Beklenen ve Fark toplamına dahil değildir.
+            </p>
+        }
+    }
+
+    <h2>Eşleşme istisnaları</h2>
+    @if (_exceptions is null || (_exceptions.MissingInPoyra.Count == 0
+        && _exceptions.AmountMismatch.Count == 0 && _exceptions.MissingInStatementCount == 0))
+    {
+        <p class="empty">İstisna yok.</p>
+    }
+    else
+    {
+        <ul class="exceptions">
+            @foreach (var line in _exceptions.MissingInPoyra)
+            {
+                <li><span class="badge err">Defterde yok</span>
+                    <span class="mono">@line.OrderId</span> (@line.LineType, satır @line.LineNo)</li>
+            }
+            @foreach (var line in _exceptions.AmountMismatch)
+            {
+                <li><span class="badge warn">Tutar uyuşmuyor</span>
+                    <span class="mono">@line.OrderId</span> — ekstre @Fmt.Money(line.GrossMinor, "TRY")</li>
+            }
+            @if (_exceptions.MissingInStatementCount > 0)
+            {
+                <li><span class="badge warn">Ekstrede yok</span>
+                    @_exceptions.MissingInStatementCount tahsilat bankada görünmüyor</li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid StatementId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private CommissionReportDto? _report;
+    private StatementExceptionsDto? _exceptions;
+    private ValorReportDto? _valor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _report = await Dispatcher.Ask(new GetCommissionReportQuery(StatementId));
+        if (_report is null)
+            return;
+
+        _exceptions = await Dispatcher.Ask(new GetExceptionsQuery(StatementId));
+        _valor = await Dispatcher.Ask(new GetValorReportQuery(StatementId));
+    }
+}

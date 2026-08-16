@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Poyra Panel</title>
+    <base href="/" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+    <link rel="stylesheet" href="@Assets["poyra.css"]" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+    <script src="_framework/blazor.web.js"></script>
+    <script>
+        document.addEventListener('submit', function (e) {
+            if (e.defaultPrevented || e.target.closest('[data-enhance], [data-permanent]')) return;
+            var btn = e.submitter || e.target.querySelector('button[type="submit"]');
+            if (!btn || btn.disabled) return;
+            setTimeout(function () { btn.disabled = true; }, 0);
+        });
+    </script>
+</body>
+</html>

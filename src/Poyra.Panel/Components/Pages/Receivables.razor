@@ -1,0 +1,408 @@
+@page "/alacaklar"
+@attribute [Authorize]
+@using Poyra.Modules.Ledger.Features
+@inject IDispatcher Dispatcher
+
+<PageTitle>Bankalardan alacak — Poyra</PageTitle>
+
+<h1>Bankalardan alacak</h1>
+<p class="lead">
+    Ödemeyi herkes yönlendirir. Asıl soru şudur:
+    <strong>bankadan alacağım ne, ne zaman gelecek, doğru mu geldi.</strong>
+</p>
+
+<div class="tiles">
+    <div class="tile">
+        <span class="label">Toplam alacak</span>
+        <span class="value">@Fmt.Money(_summary.TotalOutstandingMinor, "TRY")</span>
+        <span class="sub">bankaların işyerine borcu</span>
+    </div>
+    <div class="tile">
+        <span class="label">Bugün gelmeli</span>
+        <span class="value">@Fmt.Money(_summary.DueTodayMinor, "TRY")</span>
+        <span class="sub">valörü @Fmt.DateOnly(_summary.Today)</span>
+    </div>
+    <div class="tile @(_summary.OverdueMinor > 0 ? "warn" : "")">
+        <span class="label">Geciken</span>
+        <span class="value">@Fmt.Money(_summary.OverdueMinor, "TRY")</span>
+        <span class="sub">@_summary.OverdueCount kayıt · valör geçti, teyit yok</span>
+    </div>
+    <div class="tile @(_summary.CommissionDeltaMinor > 0 ? "warn" : "")">
+        <span class="label">Komisyon farkı</span>
+        <span class="value">@Fmt.Money(_summary.CommissionDeltaMinor, "TRY")</span>
+        <span class="sub">@(_summary.CommissionDeltaMinor > 0 ? "bankalar FAZLA kesmiş" : "anlaşmayla uyumlu")</span>
+    </div>
+</div>
+
+<p class="hint">
+    <strong>Bu Poyra'nın bakiyesi değildir.</strong> Poyra parayı ne alır, ne tutar, ne
+    dağıtır — burada tutulan kayıt bankanın işyerine olan <em>borcunun</em> aynasıdır.
+    <strong>Beklenen</strong> tutarlar anlaşmadan hesaplanır (bizim iddiamız),
+    <strong>kesilen</strong> tutarlar POS ekstresinden gelir (bankanın söylediği).
+    İkisi bilinçli olarak ayrı durur: birleştirmek aradaki farkı yok ederdi.
+</p>
+
+@if (_summary.UnknownTermsCount > 0)
+{
+    <div class="alert err" role="alert">
+        <strong>@_summary.UnknownTermsCount kaydın komisyon anlaşması yok.</strong>
+        Beklenen tutar hesaplanamadığı için bu kayıtlar brüt tutarla sayıldı ve
+        komisyon denetimine giremiyor. Anlaşmayı <a href="/mutabakat">Mutabakat</a>
+        ekranından tanımlayın.
+    </div>
+}
+
+<h2>Üç yönlü mutabakat — para gerçekten geldi mi</h2>
+<p class="hint">
+    POS ekstresi bankanın <strong>"ödeyeceğim"</strong> dediği yerdir; hesap ekstresi
+    <strong>"ödedim"</strong> dediği yer. İkisinin tutmadığı durumlar sıktır (eksik
+    ödeme, geç valör, netleştirilmiş kesinti) ve bugün kimse kontrol etmez.
+    Karşılaştırma <strong>gün-küme</strong> yapılır: banka hasılatı toplu yatırır.
+</p>
+
+<div class="tiles">
+    <div class="tile @(_settlement.ShortfallMinor > 0 ? "warn" : "")">
+        <span class="label">Eksik yatan</span>
+        <span class="value">@Fmt.Money(_settlement.ShortfallMinor, "TRY")</span>
+        <span class="sub">bankadan sorulacak para</span>
+    </div>
+    <div class="tile">
+        <span class="label">Kapanan gün</span>
+        <span class="value">@_settlement.SettledDays</span>
+        <span class="sub">kuruşu kuruşuna yattı</span>
+    </div>
+    <div class="tile @(_settlement.ShortDays > 0 ? "warn" : "")">
+        <span class="label">Eksik yatan gün</span>
+        <span class="value">@_settlement.ShortDays</span>
+        <span class="sub">yattı ama eksik</span>
+    </div>
+    <div class="tile @(_settlement.MissingDays > 0 ? "warn" : "")">
+        <span class="label">Hiç yatmayan gün</span>
+        <span class="value">@_settlement.MissingDays</span>
+        <span class="sub">en ağır bulgu</span>
+    </div>
+</div>
+
+@if (_settlement.Findings.Count > 0)
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+            <tr>
+                <th>Valör günü</th>
+                <th>Sonuç</th>
+                <th class="num">Beklenen</th>
+                <th class="num">Yatan</th>
+                <th class="num">Fark</th>
+                <th class="num hide-narrow">Alacak</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var f in _settlement.Findings)
+            {
+                <tr>
+                    <td>@Fmt.DateOnly(f.ValueDate)</td>
+                    <td><span class="badge @OutcomeClass(f.Outcome)">@OutcomeText(f.Outcome)</span></td>
+                    <td class="num">@Fmt.Money(f.ExpectedMinor, "TRY")</td>
+                    <td class="num">@Fmt.Money(f.ActualMinor, "TRY")</td>
+                    <td class="num">
+                        @if (f.DeltaMinor != 0)
+                        {
+                            <span class="badge @(f.DeltaMinor < 0 ? "warn" : "")">
+                                @Fmt.Money(f.DeltaMinor, "TRY")
+                            </span>
+                        }
+                        else
+                        {
+                            <span>—</span>
+                        }
+                    </td>
+                    <td class="num hide-narrow">@f.ReceivableCount</td>
+                </tr>
+            }
+            </tbody>
+            <tfoot>
+            <tr>
+                <th>Toplam</th>
+                <th></th>
+                <th class="num mono">@Fmt.Money(_settlement.Findings.Sum(f => f.ExpectedMinor), "TRY")</th>
+                <th class="num mono">@Fmt.Money(_settlement.Findings.Sum(f => f.ActualMinor), "TRY")</th>
+                <th class="num mono @(_settlement.Findings.Sum(f => f.DeltaMinor) < 0 ? "err-text" : "")">
+                    @Fmt.Money(_settlement.Findings.Sum(f => f.DeltaMinor), "TRY")
+                </th>
+                <th class="num hide-narrow">@_settlement.Findings.Sum(f => f.ReceivableCount)</th>
+            </tr>
+            </tfoot>
+        </table>
+    </div>
+}
+else
+{
+    <div class="empty-state">
+        <p class="es-title">Henüz hesap ekstresi yüklenmedi</p>
+        <p class="es-hint">
+            Bankanızın <strong>MT940</strong> dosyasını ya da CSV ekstresini
+            <span class="mono">POST /v1/settlements/upload</span> ile yükleyin;
+            yatan para POS ekstresiyle gün gün karşılaştırılır.
+        </p>
+    </div>
+}
+
+<h2>Banka bazında</h2>
+
+@if (_summary.Accounts.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">Henüz alacak kaydı yok</p>
+        <p class="es-hint">
+            Tahsilatlar defterlendikçe banka bazında alacaklar burada birikir.
+        </p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+            <tr>
+                <th>POS hesabı</th>
+                <th class="num hide-narrow">Kayıt</th>
+                <th class="num">Alacak</th>
+                <th class="num">Geciken</th>
+                <th class="num">Komisyon farkı</th>
+                <th class="num hide-narrow">En büyük gecikme</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var row in _summary.Accounts)
+            {
+                <tr>
+                    @* DOM'da tam kimlik: görselde üç nokta, kopyalama tam ID alır *@
+                    <td><span class="mono id-cell" title="@row.ConnectorAccountId">@row.ConnectorAccountId</span></td>
+                    <td class="num hide-narrow">@row.Count</td>
+                    <td class="num">@Fmt.Money(row.OutstandingMinor, "TRY")</td>
+                    <td class="num">
+                        @if (row.OverdueMinor > 0)
+                        {
+                            <span class="badge warn">@Fmt.Money(row.OverdueMinor, "TRY")</span>
+                        }
+                        else
+                        {
+                            <span>—</span>
+                        }
+                    </td>
+                    <td class="num">
+                        @if (row.CommissionDeltaMinor != 0)
+                        {
+                            <span class="badge @(row.CommissionDeltaMinor > 0 ? "warn" : "")">
+                                @Fmt.Money(row.CommissionDeltaMinor, "TRY")
+                            </span>
+                        }
+                        else
+                        {
+                            <span>—</span>
+                        }
+                    </td>
+                    <td class="num hide-narrow">@(row.MaxDelayDays > 0 ? $"{row.MaxDelayDays} gün" : "—")</td>
+                </tr>
+            }
+            </tbody>
+            <tfoot>
+            <tr>
+                <th>Toplam</th>
+                <th class="num hide-narrow">@_summary.Accounts.Sum(a => a.Count)</th>
+                <th class="num mono">@Fmt.Money(_summary.Accounts.Sum(a => a.OutstandingMinor), "TRY")</th>
+                <th class="num mono @(_summary.Accounts.Sum(a => a.OverdueMinor) > 0 ? "err-text" : "")">
+                    @Fmt.Money(_summary.Accounts.Sum(a => a.OverdueMinor), "TRY")
+                </th>
+                <th class="num mono">@Fmt.Money(_summary.Accounts.Sum(a => a.CommissionDeltaMinor), "TRY")</th>
+                <th class="num hide-narrow"></th>
+            </tr>
+            </tfoot>
+        </table>
+    </div>
+}
+
+<h2>Alacak kayıtları</h2>
+
+<form method="get" class="filters">
+    <label>Durum
+        <select name="durum">
+            <option value="">Tümü</option>
+            @foreach (var (key, text) in StatusOptions)
+            {
+                <option value="@key" selected="@(Durum == key)">@text</option>
+            }
+        </select>
+    </label>
+    <button type="submit" class="secondary">Filtrele</button>
+</form>
+
+@if (_rows.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">Alacak kaydı bulunamadı</p>
+        <p class="es-hint">
+            Filtreye uyan kayıt yok. Filtreyi genişletin; tahsilatlar defterlendikçe
+            her çekim burada bir alacak kaydına dönüşür.
+        </p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+            <tr>
+                <th>Kayıt</th>
+                <th class="hide-narrow">Tür</th>
+                <th>Durum</th>
+                <th class="num">Brüt</th>
+                <th class="num hide-narrow">Beklenen komisyon</th>
+                <th class="num hide-narrow">Kesilen komisyon</th>
+                <th class="num">Fark</th>
+                <th>Beklenen valör</th>
+                <th class="num">Gecikme</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var row in _rows)
+            {
+                <tr>
+                    <td>
+                        <span class="mono id-cell" title="@row.Id">@row.Id</span>
+                        @if (row.PaymentId is { Length: > 0 } paymentId)
+                        {
+                            <div class="hint"><a class="link" href="/odemeler/@paymentId">ödemeye git →</a></div>
+                        }
+                    </td>
+                    <td class="hide-narrow">@KindText(row.Kind)</td>
+                    <td><span class="badge @StatusClass(row.Status)">@StatusText(row.Status)</span></td>
+                    <td class="num">@Fmt.Money(row.GrossMinor, row.Currency)</td>
+                    <td class="num hide-narrow">
+                        @(row.ExpectedCommissionMinor is { } expected
+                            ? Fmt.Money(expected, row.Currency)
+                            : "—")
+                    </td>
+                    <td class="num hide-narrow">
+                        @(row.ConfirmedCommissionMinor is { } confirmed
+                            ? Fmt.Money(confirmed, row.Currency)
+                            : "—")
+                    </td>
+                    <td class="num">
+                        @if (row.CommissionDeltaMinor is { } delta && delta != 0)
+                        {
+                            <span class="badge @(delta > 0 ? "warn" : "")">@Fmt.Money(delta, row.Currency)</span>
+                        }
+                        else if (row.CommissionDeltaMinor is null)
+                        {
+                            <span class="hint">bilinmiyor</span>
+                        }
+                        else
+                        {
+                            <span>—</span>
+                        }
+                    </td>
+                    <td>@(row.ExpectedValueDate is { } due ? Fmt.DateOnly(due) : "—")</td>
+                    <td class="num">
+                        @if (row.ValueDateDelayDays is { } delay && delay > 0)
+                        {
+                            <span class="badge warn">@delay gün</span>
+                        }
+                        else
+                        {
+                            <span>—</span>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+            <tfoot>
+            <tr>
+                <th>Toplam</th>
+                <th class="hide-narrow"></th>
+                <th>@_rows.Count kayıt</th>
+                <th class="num mono">@Fmt.Money(_rows.Sum(r => r.GrossMinor), "TRY")</th>
+                <th class="num mono hide-narrow">
+                    @Fmt.Money(_rows.Sum(r => r.ExpectedCommissionMinor ?? 0), "TRY")
+                </th>
+                <th class="num mono hide-narrow">
+                    @Fmt.Money(_rows.Sum(r => r.ConfirmedCommissionMinor ?? 0), "TRY")
+                </th>
+                <th class="num mono @(_rows.Sum(r => r.CommissionDeltaMinor ?? 0) > 0 ? "err-text" : "")">
+                    @Fmt.Money(_rows.Sum(r => r.CommissionDeltaMinor ?? 0), "TRY")
+                </th>
+                <th></th>
+                <th class="num"></th>
+            </tr>
+            </tfoot>
+        </table>
+    </div>
+}
+
+@code {
+    private static readonly (string Key, string Text)[] StatusOptions =
+    [
+        ("expected", "Beklemede"),
+        ("bank_confirmed", "Banka teyit etti"),
+        ("overdue", "Gecikmiş"),
+        ("settled", "Hesaba geçti"),
+        ("reversed", "Ters kayıt"),
+    ];
+
+    private ReceivableSummary _summary = new(default, 0, 0, 0, 0, 0, 0, 0, []);
+    private SettlementReport _settlement = new(0, 0, 0, 0, 0, []);
+    private IReadOnlyList<ReceivableDto> _rows = [];
+
+    [SupplyParameterFromQuery(Name = "durum")]
+    private string? Durum { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _summary = await Dispatcher.Ask(new ReceivableSummaryQuery());
+        _settlement = await Dispatcher.Ask(new SettlementReportQuery(null));
+        _rows = await Dispatcher.Ask(new ListReceivablesQuery(
+            string.IsNullOrWhiteSpace(Durum) ? null : Durum, null, null));
+    }
+
+    private static string OutcomeText(string outcome) => outcome switch
+    {
+        "settled" => "Tam yattı",
+        "short" => "EKSİK yattı",
+        "over" => "Fazla yattı",
+        "missing" => "HİÇ yatmadı",
+        _ => outcome,
+    };
+
+    private static string OutcomeClass(string outcome) => outcome switch
+    {
+        "settled" => "ok",
+        "missing" => "err",
+        _ => "warn",
+    };
+
+    private static string KindText(string kind) => kind switch
+    {
+        "sale" => "Tahsilat",
+        "refund" => "İade",
+        _ => kind,
+    };
+
+    private static string StatusText(string status) => status switch
+    {
+        "expected" => "Beklemede",
+        "bank_confirmed" => "Banka teyit etti",
+        "settled" => "Hesaba geçti",
+        "overdue" => "Gecikmiş",
+        "reversed" => "Ters kayıt",
+        _ => status,
+    };
+
+    private static string StatusClass(string status) => status switch
+    {
+        "settled" => "ok",
+        "overdue" => "warn",
+        "reversed" => "err",
+        _ => "",
+    };
+}

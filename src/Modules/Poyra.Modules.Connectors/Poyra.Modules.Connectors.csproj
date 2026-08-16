@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Poyra.SharedKernel\Poyra.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Poyra.Persistence\Poyra.Persistence.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Abstractions\Poyra.Connectors.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.NestPay\Poyra.Connectors.NestPay.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Gvp\Poyra.Connectors.Gvp.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.PayFlex\Poyra.Connectors.PayFlex.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Posnet\Poyra.Connectors.Posnet.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Stripe\Poyra.Connectors.Stripe.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Adyen\Poyra.Connectors.Adyen.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.InterVpos\Poyra.Connectors.InterVpos.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Boa\Poyra.Connectors.Boa.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.CCPayment\Poyra.Connectors.CCPayment.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Iyzico\Poyra.Connectors.Iyzico.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Moka\Poyra.Connectors.Moka.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Payten\Poyra.Connectors.Payten.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.PayFor\Poyra.Connectors.PayFor.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.PayNKolay\Poyra.Connectors.PayNKolay.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Tami\Poyra.Connectors.Tami.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.AhlPay\Poyra.Connectors.AhlPay.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.ParamPos\Poyra.Connectors.ParamPos.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.PayTR\Poyra.Connectors.PayTR.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Craftgate\Poyra.Connectors.Craftgate.csproj" />
+    <!-- Yalnız Contracts (ITenantDirectory) — mimari test iç ad alanlarını yasaklar -->
+    <ProjectReference Include="..\Poyra.Modules.Tenancy\Poyra.Modules.Tenancy.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FastEndpoints" />
+    <PackageReference Include="Hangfire.Core" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

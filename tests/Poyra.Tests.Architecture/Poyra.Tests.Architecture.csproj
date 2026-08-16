@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Poyra.SharedKernel\Poyra.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\Poyra.Persistence\Poyra.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Tenancy\Poyra.Modules.Tenancy.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Payments\Poyra.Modules.Payments.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Installments\Poyra.Modules.Installments.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.PayFlex\Poyra.Connectors.PayFlex.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Abstractions\Poyra.Connectors.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Recon\Poyra.Modules.Recon.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Vault\Poyra.Modules.Vault.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Subscriptions\Poyra.Modules.Subscriptions.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Disputes\Poyra.Modules.Disputes.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Risk\Poyra.Modules.Risk.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Compliance\Poyra.Modules.Compliance.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Customers\Poyra.Modules.Customers.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.PaymentLinks\Poyra.Modules.PaymentLinks.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="NetArchTest.Rules" />
+  </ItemGroup>
+
+</Project>

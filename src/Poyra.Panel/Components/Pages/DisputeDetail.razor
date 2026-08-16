@@ -1,0 +1,267 @@
+@page "/itirazlar/{Id}"
+@attribute [Authorize]
+@using Poyra.Modules.Disputes.Features
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>İtiraz @Id — Poyra</PageTitle>
+
+<p class="crumb"><a href="/itirazlar">← İtirazlar</a></p>
+
+@if (_detail is null)
+{
+    <h1>İtiraz bulunamadı</h1>
+    <p class="empty">Bu kimlikle bir dosya yok: <span class="mono">@Id</span></p>
+}
+else
+{
+    var dispute = _detail.Dispute;
+    var effective = DisputeText.Effective(dispute);
+    var activeEvidence = _detail.Evidence.Count(e => !e.Revoked);
+
+    <h1>@DisputeText.Reason(dispute.Reason)</h1>
+    <p class="lead mono">@dispute.Id</p>
+
+    @if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+    {
+        <div class="alert ok" role="status">@sonucMesaj</div>
+    }
+    @if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+    {
+        <div class="alert err" role="alert">@hataMesaj</div>
+    }
+
+    @if (dispute.Status == "open")
+    {
+        <div class="alert @DisputeText.RemainingClass(dispute)" role="alert">
+            <strong>Kanıt süresi: @DisputeText.Remaining(dispute)</strong>
+            (@Fmt.Date(dispute.EvidenceDueAt))
+            — süre dolduktan sonra savunma kabul edilmez ve dosya otomatik kaybedilir.
+        </div>
+    }
+
+    <div class="summary">
+        <div>
+            <span class="label">Durum</span>
+            <span class="badge @DisputeText.StatusClass(DisputeText.Effective(dispute))">@DisputeText.Status(DisputeText.Effective(dispute))</span>
+        </div>
+        <div>
+            <span class="label">Kademe</span>
+            @DisputeText.Stage(dispute.Stage)
+        </div>
+        <div>
+            <span class="label">İtiraz tutarı</span>
+            <span class="mono">@Fmt.Money(dispute.AmountMinor, dispute.Currency)</span>
+        </div>
+        <div>
+            <span class="label">Ödeme</span>
+            <a class="mono" href="/odemeler/@dispute.PaymentId">@dispute.PaymentId</a>
+        </div>
+        <div>
+            <span class="label">Banka dosya no</span>
+            <span class="mono">@(dispute.ConnectorDisputeId ?? "—")</span>
+        </div>
+        <div>
+            <span class="label">Açılış</span>
+            <span class="mono">@Fmt.Date(dispute.OpenedAt)</span>
+        </div>
+        @if (dispute.RawReasonCode is { Length: > 0 } raw)
+        {
+            <div>
+                <span class="label">Banka kodu</span>
+                <span class="mono">@raw</span>
+            </div>
+        }
+    </div>
+
+    <h2>Kanıtlar</h2>
+    @if (_detail.Evidence.Count == 0)
+    {
+        <p class="empty">Henüz belge yüklenmedi.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Belge</th>
+                        <th>Tür</th>
+                        <th class="num">Boyut</th>
+                        <th>Yüklenme</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var evidence in _detail.Evidence)
+                    {
+                        <tr class="@(evidence.Revoked ? "muted-row" : "")">
+                            <td>
+                                <a href="/itirazlar/@dispute.Id/kanit/@evidence.Id">@evidence.FileName</a>
+                                @if (evidence.Revoked)
+                                {
+                                    <span class="badge muted">iptal</span>
+                                }
+                            </td>
+                            <td>@DisputeText.Kind(evidence.Kind)</td>
+                            <td class="num mono">@FormatSize(evidence.SizeBytes)</td>
+                            <td class="mono">@Fmt.Date(evidence.CreatedAt)</td>
+                            <td>
+                                @if (_canWrite && !evidence.Revoked && !IsFinal(effective))
+                                {
+                                    <form method="post" action="/itirazlar/@dispute.Id/kanit/@evidence.Id/iptal">
+                                        <AntiforgeryToken />
+                                        <button type="submit" class="link danger">İptal et</button>
+                                    </form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (_canWrite && effective == "expired")
+    {
+        <p class="hint">Süre doldu — dosyaya artık belge eklenemez.</p>
+    }
+
+    @if (_canWrite && !IsFinal(effective))
+    {
+        <h3>Belge ekle</h3>
+        <form method="post" action="/itirazlar/@dispute.Id/kanit" enctype="multipart/form-data" class="filters">
+            <AntiforgeryToken />
+            <label>
+                Dosya (PDF/JPEG/PNG/WEBP/TXT, en çok 10 MB)
+                <input type="file" name="file" required
+                       accept="application/pdf,image/jpeg,image/png,image/webp,text/plain" />
+            </label>
+            <label>
+                Tür
+                <select name="kind">
+                    @foreach (var kind in DisputeText.Kinds)
+                    {
+                        <option value="@kind">@DisputeText.Kind(kind)</option>
+                    }
+                </select>
+            </label>
+            <button type="submit" class="primary">Yükle</button>
+        </form>
+
+        @if (effective == "open")
+        {
+            <h3>Savunmayı gönder</h3>
+            <form method="post" action="/itirazlar/@dispute.Id/gonder">
+                <AntiforgeryToken />
+                <label>
+                    Savunma metni
+                    <textarea name="summary" rows="5" maxlength="4000"
+                              placeholder="Örn. Ürün 12.07.2026'da teslim edildi; imzalı tutanak ve kargo takip kaydı ektedir."></textarea>
+                </label>
+                <div class="actions">
+                    <button type="submit" class="primary" disabled="@(activeEvidence == 0)">Bankaya ilet</button>
+                    @if (activeEvidence == 0)
+                    {
+                        <span class="hint">Önce en az bir belge yükleyin — belgesiz savunma bankada reddedilir.</span>
+                    }
+                </div>
+            </form>
+            <p class="hint">
+                TR bankalarının çoğunda yanıt kendi portalları üzerinden verilir; bu adım
+                dosyayı hazırlar, süreyi durdurur ve kaydı "incelemede"ye alır.
+            </p>
+
+            <div class="actions">
+                <form method="post" action="/itirazlar/@dispute.Id/vazgec">
+                    <AntiforgeryToken />
+                    <label class="check"><input type="checkbox" name="onay" value="1" required /> Sonucun kalıcı olduğunu anladım</label>
+                    <button type="submit" class="secondary danger">Vazgeç — tutar müşteride kalır</button>
+                </form>
+            </div>
+            <p class="hint">
+                Küçük tutarda savunma maliyeti itiraz tutarını aşabilir — vazgeçmek
+                meşru bir iş kararıdır ve kayıt silinmez, kapanır.
+            </p>
+        }
+
+        @if (dispute.Status == "under_review")
+        {
+            <h3>Bankanın kararı</h3>
+            <div class="actions">
+                <form method="post" action="/itirazlar/@dispute.Id/sonuc">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="outcome" value="won" />
+                    <button type="submit" class="secondary">Kazanıldı</button>
+                </form>
+                <form method="post" action="/itirazlar/@dispute.Id/sonuc">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="outcome" value="lost" />
+                    <label class="check"><input type="checkbox" name="onay" value="1" required /> Sonucun kalıcı olduğunu anladım</label>
+                    <button type="submit" class="secondary danger">Kaybedildi — tutar müşteride kalır</button>
+                </form>
+            </div>
+        }
+    }
+
+    @if (dispute.EvidenceSummary is { Length: > 0 } summary)
+    {
+        <h2>Gönderilen savunma</h2>
+        <div class="reason">
+            <p class="lead">@Fmt.Date(dispute.SubmittedAt ?? dispute.OpenedAt)</p>
+            <p>@summary</p>
+        </div>
+    }
+
+    <h2>Zaman çizelgesi</h2>
+    <ul class="timeline">
+        @foreach (var entry in _detail.Timeline)
+        {
+            <li>
+                <span class="when mono">@Fmt.Date(entry.CreatedAt)</span>
+                <strong class="what">@DisputeText.Event(entry.EventType)</strong>
+                <span class="who">@entry.Actor</span>
+                @if (entry.Payload is { Length: > 2 })
+                {
+                    <div class="payload mono">@entry.Payload</div>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter]
+    public string Id { get; set; } = "";
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private DisputeDetailResponse? _detail;
+    private bool _canWrite;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canWrite = Session.HasRank(TenantRole.Operations);
+
+        try
+        {
+            _detail = await Dispatcher.Ask(new GetDisputeQuery(Id));
+        }
+        catch (Poyra.SharedKernel.Errors.PoyraException)
+        {
+            _detail = null;
+        }
+    }
+
+    private static bool IsFinal(string status) => status is "won" or "lost" or "accepted" or "expired";
+
+    private static string FormatSize(int bytes)
+        => bytes < 1024 ? $"{bytes} B"
+            : bytes < 1024 * 1024 ? $"{bytes / 1024} KB"
+            : $"{bytes / (1024 * 1024.0):N1} MB";
+}

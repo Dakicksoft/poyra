@@ -1,0 +1,56 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Poyra.Api/Poyra.Api.csproj" />
+    <Project Path="src/Poyra.Checkout/Poyra.Checkout.csproj" />
+    <Project Path="src/Poyra.Panel/Poyra.Panel.csproj" />
+    <Project Path="src/Poyra.Persistence/Poyra.Persistence.csproj" />
+    <Project Path="src/Poyra.SharedKernel/Poyra.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Connectors/">
+    <Project Path="src/Connectors/Poyra.Connectors.Abstractions/Poyra.Connectors.Abstractions.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Adyen/Poyra.Connectors.Adyen.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.CCPayment/Poyra.Connectors.CCPayment.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Craftgate/Poyra.Connectors.Craftgate.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.PayTR/Poyra.Connectors.PayTR.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.ParamPos/Poyra.Connectors.ParamPos.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.AhlPay/Poyra.Connectors.AhlPay.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Tami/Poyra.Connectors.Tami.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.PayNKolay/Poyra.Connectors.PayNKolay.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.PayFor/Poyra.Connectors.PayFor.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Payten/Poyra.Connectors.Payten.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Moka/Poyra.Connectors.Moka.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Iyzico/Poyra.Connectors.Iyzico.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Gvp/Poyra.Connectors.Gvp.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.InterVpos/Poyra.Connectors.InterVpos.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Boa/Poyra.Connectors.Boa.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.NestPay/Poyra.Connectors.NestPay.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.PayFlex/Poyra.Connectors.PayFlex.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Posnet/Poyra.Connectors.Posnet.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Stripe/Poyra.Connectors.Stripe.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/">
+    <Project Path="src/Modules/Poyra.Modules.Compliance/Poyra.Modules.Compliance.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Connectors/Poyra.Modules.Connectors.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Customers/Poyra.Modules.Customers.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Field/Poyra.Modules.Field.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Ledger/Poyra.Modules.Ledger.csproj" />
+    <Project Path="src/Poyra.Field.Core/Poyra.Field.Core.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Disputes/Poyra.Modules.Disputes.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Installments/Poyra.Modules.Installments.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.PaymentLinks/Poyra.Modules.PaymentLinks.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Payments/Poyra.Modules.Payments.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Recon/Poyra.Modules.Recon.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Risk/Poyra.Modules.Risk.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Routing/Poyra.Modules.Routing.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Subscriptions/Poyra.Modules.Subscriptions.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Tenancy/Poyra.Modules.Tenancy.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Vault/Poyra.Modules.Vault.csproj" />
+    <Project Path="src/Modules/Poyra.Modules.Webhooks/Poyra.Modules.Webhooks.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Poyra.Tests.Architecture/Poyra.Tests.Architecture.csproj" />
+    <Project Path="tests/Poyra.Tests.E2E/Poyra.Tests.E2E.csproj" />
+    <Project Path="tests/Poyra.Tests.Integration/Poyra.Tests.Integration.csproj" />
+    <Project Path="tests/Poyra.Tests.Unit/Poyra.Tests.Unit.csproj" />
+  </Folder>
+</Solution>

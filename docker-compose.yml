@@ -1,0 +1,23 @@
+name: poyra
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: poyra-postgres
+    environment:
+      POSTGRES_USER: poyra          # owner rol — migration'lar bununla koşar
+      POSTGRES_PASSWORD: poyra_pw
+      POSTGRES_DB: poyra
+    ports:
+      - "5442:5432"
+    volumes:
+      - poyra_pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poyra -d poyra"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  poyra_pgdata:

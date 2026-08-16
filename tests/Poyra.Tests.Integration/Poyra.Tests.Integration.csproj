@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Poyra.Api\Poyra.Api.csproj" />
+    <ProjectReference Include="..\..\src\Poyra.Panel\Poyra.Panel.csproj" />
+    <ProjectReference Include="..\..\src\Poyra.Checkout\Poyra.Checkout.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Compliance\Poyra.Modules.Compliance.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Customers\Poyra.Modules.Customers.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+</Project>

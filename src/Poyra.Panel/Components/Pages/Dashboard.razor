@@ -1,0 +1,93 @@
+@page "/"
+@attribute [Authorize]
+@using Poyra.Modules.Payments.Features.Analytics
+@using Poyra.Modules.Payments.Features.ListPayments
+@using Poyra.Modules.Connectors.Features
+@inject IDispatcher Dispatcher
+
+<PageTitle>Genel Bakış — Poyra</PageTitle>
+
+<h1>Genel Bakış</h1>
+<p class="muted">Bugünün özeti ve son işlemler.</p>
+
+@if (_troubled.Count > 0)
+{
+    <div class="alert warn" role="alert">
+        <strong>POS bağlantı uyarısı:</strong>
+        @string.Join(", ", _troubled.Select(a => a.Label)) şu an sağlıksız görünüyor —
+        trafik sağlıklı hesaplara yönlendiriliyor.
+        <a href="/baglantilar">Bağlantıları incele →</a>
+    </div>
+}
+
+<div class="tiles">
+    <div class="tile">
+        <span class="label">Bugün tahsilat</span>
+        <span class="value">@Fmt.Money(_today?.GmvMinor ?? 0, "TRY")</span>
+        <span class="sub">@(_today?.Succeeded ?? 0) başarılı deneme</span>
+    </div>
+    <div class="tile">
+        <span class="label">Başarı oranı (bugün)</span>
+        <span class="value">@RateText(_today)</span>
+        <span class="sub">@(_yesterday is { } y ? $"dün: {RateText(y)}" : $"{FailedToday} başarısız")</span>
+    </div>
+    <div class="tile">
+        <span class="label">Bekleyen (3DS)</span>
+        <span class="value">@(_pendingCount >= PendingCap ? $"{PendingCap}+" : _pendingCount.ToString())</span>
+        <span class="sub">müşteri dönüşü bekliyor</span>
+    </div>
+    <a class="tile @(_troubled.Count > 0 ? "warn" : "")" href="/baglantilar">
+        <span class="label">Bağlantı sağlığı</span>
+        <span class="value">@(_accounts.Count - _troubled.Count)/@_accounts.Count</span>
+        <span class="sub">@(_troubled.Count > 0 ? $"{_troubled.Count} hesap sorunlu →" : "tümü sağlıklı →")</span>
+    </a>
+</div>
+
+@if (_overview is { ByDay.Count: > 1 })
+{
+    <div class="spark-head">
+        <h2>Son 7 gün başarı oranı</h2>
+        <span class="hint">deneme bazında · @Fmt.DateOnly(_overview.FromDay) – @Fmt.DateOnly(_overview.ToDay)</span>
+    </div>
+    <div class="spark rate">
+        @foreach (var day in _overview.ByDay)
+        {
+            var rate = day.Attempts == 0 ? 0 : 100.0 * day.Succeeded / day.Attempts;
+            <span class="bar" style="height: @(Math.Max(rate, 4).ToString("0", System.Globalization.CultureInfo.InvariantCulture))%"
+                  title="@Fmt.DateOnly(day.Day): %@rate.ToString("0.0", Tr) (@day.Attempts deneme)"></span>
+        }
+    </div>
+}
+
+<LiveFeed />
+
+@code {
+    private const int PendingCap = 100;
+    private static readonly System.Globalization.CultureInfo Tr =
+        System.Globalization.CultureInfo.GetCultureInfo("tr-TR");
+
+    private AnalyticsOverviewDto? _overview;
+    private DayRow? _today, _yesterday;
+    private IReadOnlyList<ConnectorAccountResponse> _accounts = [];
+    private List<ConnectorAccountResponse> _troubled = [];
+    private int _pendingCount;
+
+    private int FailedToday => _today is { } t ? t.Attempts - t.Succeeded : 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _overview = await Dispatcher.Ask(new AnalyticsOverviewQuery(7));
+        _accounts = await Dispatcher.Ask(new ListConnectorAccountsQuery());
+        _pendingCount = (await Dispatcher.Ask(
+            new ListPaymentsQuery("requires_action", PendingCap, Before: null))).Count;
+
+        _today = _overview.ByDay.Count > 0 ? _overview.ByDay[^1] : null;
+        _yesterday = _overview.ByDay.Count > 1 ? _overview.ByDay[^2] : null;
+        _troubled = _accounts.Where(a => a.Health != "healthy").ToList();
+    }
+
+    private static string RateText(DayRow? day)
+        => day is not { Attempts: > 0 }
+            ? "—"
+            : string.Create(Tr, $"%{100.0 * day.Succeeded / day.Attempts:0.0}");
+}

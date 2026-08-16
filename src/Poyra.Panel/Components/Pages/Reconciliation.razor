@@ -1,0 +1,144 @@
+@page "/mutabakat"
+@attribute [Authorize]
+@using Poyra.Modules.Recon.Features
+@using Poyra.Modules.Connectors.Features
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>Mutabakat — Poyra</PageTitle>
+
+<h1>Mutabakat</h1>
+<p class="muted">Banka ekstresi ile defterin karşılaştırması ve komisyon denetimi.</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+@if (_canUpload)
+{
+    <h2>Ekstre yükle</h2>
+    <form method="post" action="/mutabakat/ekstre-yukle" enctype="multipart/form-data" class="filters">
+        <AntiforgeryToken />
+        <label>
+            POS hesabı
+            <select name="connectorAccountId" required>
+                @foreach (var account in _accounts)
+                {
+                    <option value="@account.Id">@account.Label (@account.ConnectorKey)</option>
+                }
+            </select>
+        </label>
+        <label>
+            Ekstre günü
+            <input type="date" name="statementDate" required
+                   value="@DateOnly.FromDateTime(DateTime.Today.AddDays(-1)).ToString("yyyy-MM-dd")"
+                   max="@DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd")" />
+        </label>
+        <label>
+            Format
+            <select name="format">
+                <option value="poyra_csv">Poyra CSV</option>
+                <option value="nestpay_csv">NestPay gün sonu (CSV)</option>
+                <option value="gvp_csv">GVP gün sonu (CSV)</option>
+            </select>
+        </label>
+        <label>
+            Dosya
+            <input type="file" name="file" accept=".csv,text/csv" required />
+        </label>
+        <button type="submit" class="primary">Yükle</button>
+    </form>
+    <p class="hint">
+        Poyra CSV kolonları: <code>order_id;type;gross;commission;net;value_date</code> —
+        bankanızın gün sonu dosyası için NestPay/GVP formatını seçin.
+    </p>
+}
+
+@if (_statements.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">Henüz ekstre yüklenmemiş</p>
+        <p class="es-hint">
+            Bankanızın gün sonu ekstresi yüklendiğinde Poyra her satırı defterle eşleştirir ve
+            kesilen komisyonu anlaşma oranıyla kuruşuna kadar karşılaştırır.
+        </p>
+        @if (_canUpload)
+        {
+            <p class="hint">İlk ekstrenizi yukarıdaki formdan yükleyin.</p>
+        }
+        else
+        {
+            <p class="hint">Yükleme için 'finance' rolü gerekir; API ucu: <code>POST /v1/recon/statements/upload</code></p>
+        }
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Tarih</th>
+                    <th>Durum</th>
+                    <th class="num">Satır</th>
+                    <th class="num">Eşleşen</th>
+                    <th class="num">İstisna</th>
+                    <th class="num">Komisyon farkı</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var statement in _statements)
+                {
+                    var exceptions = statement.MissingInPoyraCount + statement.AmountMismatchCount
+                        + statement.MissingInStatementCount;
+                    <tr>
+                        <td class="mono">@Fmt.DateOnly(statement.StatementDate)</td>
+                        <td><span class="badge @Fmt.StatementStatusClass(statement.Status)">@Fmt.StatementStatus(statement.Status)</span></td>
+                        <td class="num">@statement.LineCount</td>
+                        <td class="num">@statement.MatchedCount</td>
+                        <td class="num">
+                            <span class="@(exceptions > 0 ? "warn-text" : "")">@exceptions</span>
+                        </td>
+                        <td class="num mono">
+                            <span class="@(statement.CommissionDeltaSum > 0 ? "err-text" : "")">
+                                @Fmt.Money(statement.CommissionDeltaSum, "TRY")
+                            </span>
+                        </td>
+                        <td><a href="/mutabakat/@statement.Id">Rapor</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (_statements.Count >= 100)
+    {
+        <p class="hint">Son 100 ekstre gösteriliyor — daha eskiler API üzerinden listelenebilir.</p>
+    }
+}
+
+@code {
+    private IReadOnlyList<StatementSummaryDto> _statements = [];
+    private IReadOnlyList<ConnectorAccountResponse> _accounts = [];
+    private bool _canUpload;
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canUpload = Session.HasRank(TenantRole.Finance);
+        _statements = await Dispatcher.Ask(new ListStatementsQuery());
+        if (_canUpload)
+            _accounts = await Dispatcher.Ask(new ListConnectorAccountsQuery());
+    }
+}

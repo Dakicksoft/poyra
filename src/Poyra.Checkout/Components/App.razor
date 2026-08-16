@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <base href="/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+    <link rel="stylesheet" href="checkout.css" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+    <script>
+        document.addEventListener('submit', function (e) {
+            var btn = e.target.querySelector('button[type="submit"]');
+            if (!btn || btn.disabled) return;
+            setTimeout(function () {
+                btn.disabled = true;
+                btn.classList.add('loading');
+                if (btn.classList.contains('pay')) btn.textContent = 'Bankaya yönlendiriliyorsunuz…';
+            }, 0);
+        });
+    </script>
+</body>
+</html>

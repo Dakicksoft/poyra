@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Poyra.SharedKernel\Poyra.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Tenancy\Poyra.Modules.Tenancy.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Connectors\Poyra.Modules.Connectors.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Routing\Poyra.Modules.Routing.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Webhooks\Poyra.Modules.Webhooks.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Installments\Poyra.Modules.Installments.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Recon\Poyra.Modules.Recon.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Vault\Poyra.Modules.Vault.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Subscriptions\Poyra.Modules.Subscriptions.csproj" />
+    <ProjectReference Include="..\..\src\Poyra.Panel\Poyra.Panel.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.NestPay\Poyra.Connectors.NestPay.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Gvp\Poyra.Connectors.Gvp.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Posnet\Poyra.Connectors.Posnet.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Stripe\Poyra.Connectors.Stripe.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Adyen\Poyra.Connectors.Adyen.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.InterVpos\Poyra.Connectors.InterVpos.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Boa\Poyra.Connectors.Boa.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.CCPayment\Poyra.Connectors.CCPayment.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Iyzico\Poyra.Connectors.Iyzico.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Moka\Poyra.Connectors.Moka.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Payten\Poyra.Connectors.Payten.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.PayFor\Poyra.Connectors.PayFor.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.PayNKolay\Poyra.Connectors.PayNKolay.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Tami\Poyra.Connectors.Tami.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.AhlPay\Poyra.Connectors.AhlPay.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.ParamPos\Poyra.Connectors.ParamPos.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.PayTR\Poyra.Connectors.PayTR.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Craftgate\Poyra.Connectors.Craftgate.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Disputes\Poyra.Modules.Disputes.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Risk\Poyra.Modules.Risk.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Field\Poyra.Modules.Field.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Ledger\Poyra.Modules.Ledger.csproj" />
+    <ProjectReference Include="..\..\src\Poyra.Field.Core\Poyra.Field.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+  </ItemGroup>
+
+</Project>

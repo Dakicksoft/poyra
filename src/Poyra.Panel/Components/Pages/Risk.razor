@@ -1,0 +1,404 @@
+@page "/risk"
+@attribute [Authorize]
+@using Poyra.Modules.Risk.Features
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>Risk — Poyra</PageTitle>
+
+<h1>Risk kuralları</h1>
+<p class="lead">
+    Kural tahsilatı <strong>durdurabilir</strong>. Yayınlamadan önce aşağıdaki
+    "dene" kutusuyla hangi işlemin engelleneceğini görün — canlıda öğrenmek
+    işyerine gerçek para kaybettirir.
+</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+@if (PanelFlash.Reveal(Deneme) is { } denemeMesaj)
+{
+    <div class="alert warn" role="status"><strong>Deneme sonucu:</strong> @denemeMesaj</div>
+}
+
+<div class="tiles">
+    <div class="tile">
+        <span class="label">Aktif kural seti</span>
+        <span class="value">@(_active is null ? "—" : $"v{_active.Version}")</span>
+        <span class="sub">@(_active is null ? "kural yok — her şey geçiyor" : $"{_ruleCount} kural")</span>
+    </div>
+    <div class="tile @(_blocked > 0 ? "warn" : "")">
+        <span class="label">Engellenen (son 100)</span>
+        <span class="value">@_blocked</span>
+        <span class="sub">bankaya hiç gitmedi</span>
+    </div>
+    <div class="tile">
+        <span class="label">3DS'e zorlanan</span>
+        <span class="value">@_challenged</span>
+        <span class="sub">direct akış reddedildi</span>
+    </div>
+    <div class="tile">
+        <span class="label">Kara liste</span>
+        <span class="value">@_blocklist.Count</span>
+        <span class="sub">aktif kayıt</span>
+    </div>
+</div>
+
+<h2>Aktif kural seti</h2>
+@if (_active is null)
+{
+    <p class="empty">Yayınlanmış kural yok — hiçbir işlem engellenmiyor.</p>
+}
+else
+{
+    <p class="hint">
+        Sürüm @_active.Version · @Fmt.Date(_active.CreatedAt) ·
+        eski sürümler silinmez, pasifleşir (@_ruleSets.Count sürüm)
+    </p>
+    <pre class="payload mono wrap">@_pretty</pre>
+}
+
+@if (_canWrite)
+{
+    <h3>Kural taslağı — dene, sonra yayınla</h3>
+    <form method="post" action="/risk/dene">
+        <AntiforgeryToken />
+        <label>
+            Kural dokümanı (JSON)
+            <textarea name="document" rows="18" spellcheck="false">@_draft</textarea>
+        </label>
+
+        <div class="filters">
+            <label>
+                Tutar (₺)
+                <input type="text" name="amountLira" value="7500,00" inputmode="decimal" />
+            </label>
+            <label>
+                Saat (TR)
+                <input type="number" name="hour" value="3" min="0" max="23" />
+            </label>
+            <label>
+                Akış
+                <select name="flow">
+                    <option value="hosted">hosted (3DS)</option>
+                    <option value="direct">direct (3DS'siz)</option>
+                </select>
+            </label>
+            <label>
+                1 saatteki deneme
+                <input type="number" name="attempts1h" value="0" min="0" />
+            </label>
+            <label>
+                1 saatteki ret
+                <input type="number" name="declines1h" value="0" min="0" />
+            </label>
+        </div>
+
+        <label class="check">
+            <input type="checkbox" name="onay" value="1" required />
+            Canlı trafiğe uygulanır — anladım
+        </label>
+        <div class="actions">
+            <button type="submit" formaction="/risk/dene" formnovalidate class="ghost">
+                Kuralı dene (salt okur)
+            </button>
+            <button type="submit" formaction="/risk/yayinla" class="primary">Yayına al</button>
+        </div>
+    </form>
+    <p class="hint">
+        Sinyaller rota motoruyla aynıdır: <span class="mono">amount_minor</span>,
+        <span class="mono">hour</span>, <span class="mono">currency</span>,
+        <span class="mono">card.program</span>, <span class="mono">card.brand</span>,
+        <span class="mono">bin</span> · risk-özel:
+        <span class="mono">flow</span>, <span class="mono">velocity.attempts_1h</span>,
+        <span class="mono">velocity.declines_1h</span>,
+        <span class="mono">velocity.distinct_cards_24h</span>,
+        <span class="mono">blocklist.hit</span>.
+        Sonuç: <span class="mono">allow</span> · <span class="mono">challenge</span> (3DS zorunlu) ·
+        <span class="mono">review</span> · <span class="mono">block</span>.
+    </p>
+}
+
+<h2>Kara liste</h2>
+@if (_blocklist.Count == 0)
+{
+    <p class="empty">Kayıt yok.</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Tür</th>
+                    <th>Değer</th>
+                    <th>Gerekçe</th>
+                    <th>Bitiş</th>
+                    <th>Eklenme</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var entry in _blocklist)
+                {
+                    <tr>
+                        <td>@KindText(entry.Kind)</td>
+                        <td class="mono">@entry.Value</td>
+                        <td>@entry.Reason</td>
+                        <td class="mono">@(entry.ExpiresAt is { } expiry ? Fmt.Date(expiry) : "süresiz")</td>
+                        <td class="mono">@Fmt.Date(entry.CreatedAt)</td>
+                        <td>
+                            @if (_canWrite)
+                            {
+                                <form method="post" action="/risk/kara-liste/@entry.Id/kaldir">
+                                    <AntiforgeryToken />
+                                    <label class="check">
+                                        <input type="checkbox" name="onay" value="1" required />
+                                        '@entry.Value' engeli kalksın — anladım
+                                    </label>
+                                    <button type="submit" class="link danger">Kaldır</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_canWrite)
+{
+    <h3>Kara listeye ekle</h3>
+    <form method="post" action="/risk/kara-liste" class="filters">
+        <AntiforgeryToken />
+        <label>
+            Tür
+            <select name="kind">
+                @foreach (var kind in Kinds)
+                {
+                    <option value="@kind">@KindText(kind)</option>
+                }
+            </select>
+        </label>
+        <label>
+            Değer
+            <input type="text" name="value" required maxlength="255" placeholder="örn. 203.0.113.7" />
+        </label>
+        <label>
+            Gerekçe
+            <input type="text" name="reason" required maxlength="500" placeholder="örn. 3 chargeback" />
+        </label>
+        <label>
+            Bitiş (boş = süresiz)
+            <input type="date" name="expiresOn" />
+        </label>
+        <button type="submit" class="primary">Ekle</button>
+    </form>
+    <p class="hint">
+        IP'yi süresiz engellemek, aynı operatörün arkasındaki masum müşterileri de
+        süresiz kaybetmektir — kart deneme saldırısında süreli engel tercih edin.
+    </p>
+}
+
+<h2>Son kararlar</h2>
+<form method="get" class="filters">
+    <label>
+        Sonuç
+        <select name="sonuc2" onchange="this.form.submit()">
+            <option value="">Tümü</option>
+            @foreach (var outcome in Outcomes)
+            {
+                <option value="@outcome" selected="@(Filtre == outcome)">@OutcomeText(outcome)</option>
+            }
+        </select>
+    </label>
+    <noscript><button type="submit" class="ghost">Filtrele</button></noscript>
+</form>
+
+@if (_assessments.Count == 0)
+{
+    <p class="empty">Kayıt yok.</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Ödeme</th>
+                    <th>Sonuç</th>
+                    <th>Kural</th>
+                    <th>Akış</th>
+                    <th>Gerekçe</th>
+                    <th>Zaman</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var assessment in _assessments)
+                {
+                    <tr>
+                        <td class="mono">
+                            <a href="/odemeler/@assessment.PaymentId">@Fmt.ShortId(assessment.PaymentId)</a>
+                        </td>
+                        <td>
+                            <span class="badge @OutcomeClass(assessment.Outcome)">
+                                @OutcomeText(assessment.Outcome)
+                            </span>
+                        </td>
+                        <td>
+                            @(assessment.RuleName ?? "—")
+                            @if (assessment.RuleVersion is { } version)
+                            {
+                                <span class="hint">v@version</span>
+                            }
+                        </td>
+                        <td class="mono">@assessment.Flow</td>
+                        <td>@(assessment.Reason ?? "—")</td>
+                        <td class="mono">@Fmt.Date(assessment.CreatedAt)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private static readonly string[] Kinds = ["card", "email", "ip", "customer_ref", "bin", "country"];
+    private static readonly string[] Outcomes = ["allow", "challenge", "review", "block"];
+
+    private const string SampleDocument = """
+        {
+          "rules": [
+            { "name": "kart deneme saldırısı", "outcome": "block",
+              "when": { "all": [ { "fact": "velocity.declines_1h", "op": "gte", "value": 5 },
+                                 { "fact": "velocity.distinct_cards_24h", "op": "gte", "value": 3 } ] },
+              "reason": "Kısa sürede çok sayıda farklı kartla başarısız deneme." },
+
+            { "name": "gece yarısı yüksek tutar", "outcome": "challenge",
+              "when": { "all": [ { "fact": "amount_minor", "op": "gte", "value": 500000 },
+                                 { "fact": "hour", "op": "lte", "value": 5 } ] },
+              "reason": "5.000 ₺ üzeri gece işlemi 3D Secure ister." },
+
+            { "name": "3DS'siz yüksek tutar", "outcome": "challenge",
+              "when": { "all": [ { "fact": "flow", "op": "eq", "value": "direct" },
+                                 { "fact": "amount_minor", "op": "gte", "value": 200000 } ] },
+              "reason": "2.000 ₺ üzeri işlemde kart hamili doğrulaması zorunlu." }
+          ],
+          "default": "allow"
+        }
+        """;
+
+    private IReadOnlyList<RiskRuleSetResponse> _ruleSets = [];
+    private RiskRuleSetResponse? _active;
+    private IReadOnlyList<BlocklistEntryResponse> _blocklist = [];
+    private IReadOnlyList<RiskAssessmentResponse> _assessments = [];
+    private string _draft = SampleDocument;
+    private string _pretty = "";
+    private int _ruleCount;
+    private int _blocked;
+    private int _challenged;
+    private bool _canWrite;
+
+    [SupplyParameterFromQuery(Name = "sonuc2")]
+    private string? Filtre { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    [SupplyParameterFromQuery(Name = "deneme")]
+    private string? Deneme { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canWrite = Session.HasRank(TenantRole.Admin);
+
+        _ruleSets = await Dispatcher.Ask(new ListRiskRuleSetsQuery());
+        _active = _ruleSets.FirstOrDefault(r => r.Active);
+        _pretty = Prettify(_active?.Document);
+        _draft = _pretty is { Length: > 0 } ? _pretty : SampleDocument;
+        _ruleCount = CountRules(_active?.Document);
+
+        _blocklist = await Dispatcher.Ask(new ListBlocklistQuery(false));
+
+        _assessments = await Dispatcher.Ask(new ListRiskAssessmentsQuery(
+            string.IsNullOrEmpty(Filtre) ? null : Filtre, null, 100));
+
+        var recent = await Dispatcher.Ask(new ListRiskAssessmentsQuery(null, null, 100));
+        _blocked = recent.Count(a => a.Outcome == "block");
+        _challenged = recent.Count(a => a.Outcome == "challenge");
+    }
+
+    private static string Prettify(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return "";
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return System.Text.Json.JsonSerializer.Serialize(document,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return json;
+        }
+    }
+
+    private static int CountRules(string? document)
+    {
+        if (string.IsNullOrWhiteSpace(document))
+            return 0;
+
+        try
+        {
+            return Poyra.Modules.Risk.Domain.RiskDocument.Parse(document).Rules.Count;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return 0;
+        }
+    }
+
+    private static string KindText(string kind) => kind switch
+    {
+        "card" => "Kart (maskeli)",
+        "email" => "E-posta",
+        "ip" => "IP adresi",
+        "customer_ref" => "Müşteri",
+        "bin" => "BIN",
+        "country" => "Ülke",
+        _ => kind,
+    };
+
+    private static string OutcomeText(string outcome) => outcome switch
+    {
+        "allow" => "Geçti",
+        "challenge" => "3DS zorunlu",
+        "review" => "Gözden geçir",
+        "block" => "Engellendi",
+        _ => outcome,
+    };
+
+    private static string OutcomeClass(string outcome) => outcome switch
+    {
+        "allow" => "ok",
+        "block" => "err",
+        "challenge" => "warn",
+        _ => "info",
+    };
+}

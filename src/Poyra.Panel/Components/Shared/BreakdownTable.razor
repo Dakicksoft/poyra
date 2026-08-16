@@ -1,0 +1,60 @@
+@using Poyra.Modules.Payments.Features.Analytics
+
+@if (Rows.Count == 0)
+{
+    <p class="empty">Bu dönemde veri yok.</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>@FirstColumn</th>
+                    <th class="num">Deneme</th>
+                    <th class="num">Başarılı</th>
+                    <th class="num">Oran</th>
+                    <th class="num">Tahsilat</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Rows)
+                {
+                    <tr>
+                        <td>@row.Label</td>
+                        <td class="num">@row.Attempts</td>
+                        <td class="num">@row.Succeeded</td>
+                        <td class="num">
+                            @if (row.Attempts >= AnalyticsOverviewHandler.MinimumSample)
+                            {
+                                <span class="@(row.SuccessRate < 0.8 ? "warn-text" : "")">
+                                    @Fmt.Percent(row.SuccessRate)
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="hint" title="Örnek çok küçük — oran gürültüdür">yetersiz örnek*</span>
+                            }
+                        </td>
+                        <td class="num mono">@Fmt.Money(row.GmvMinor, "TRY")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (Rows.Any(r => r.Attempts < AnalyticsOverviewHandler.MinimumSample))
+    {
+        <p class="hint">
+            * @AnalyticsOverviewHandler.MinimumSample denemenin altındaki satırlarda oran gösterilmez —
+            küçük örneklem gürültüdür.
+        </p>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<BreakdownRow> Rows { get; set; } = [];
+
+    [Parameter]
+    public string FirstColumn { get; set; } = "";
+}

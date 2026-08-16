@@ -1,0 +1,209 @@
+@page "/odemeler/{PaymentId}"
+@attribute [Authorize]
+@using System.Text.Json
+@using Poyra.Modules.Payments.Domain
+@using Poyra.Modules.Payments.Features.CancelPayment
+@using Poyra.Modules.Payments.Features.GetTimeline
+@using Poyra.Modules.Payments.Features.Refunds
+@using Poyra.SharedKernel.Errors
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+@inject NavigationManager Navigation
+
+<PageTitle>@PaymentId — Poyra</PageTitle>
+
+<p class="crumb"><a href="/odemeler">Ödemeler</a> / <span class="mono">@Fmt.ShortId(PaymentId)</span></p>
+
+@if (_timeline is null)
+{
+    <div class="empty-state">
+        <p class="es-title">Ödeme bulunamadı</p>
+        <p class="es-hint">
+            <span class="mono">@PaymentId</span> kaydı bu işyerinde yok.
+            <a href="/odemeler">Ödeme listesine dönün</a>.
+        </p>
+    </div>
+}
+else
+{
+    <h1 class="mono" title="@_timeline.PaymentId">@_timeline.PaymentId</h1>
+
+    @if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+    {
+        <div class="alert ok" role="status">@sonucMesaj</div>
+    }
+    @if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+    {
+        <div class="alert err" role="alert">@hataMesaj</div>
+    }
+
+    @if (_timeline.Status == "succeeded" && Session.HasRank(TenantRole.Operations))
+    {
+        <div class="actions">
+            <form method="post" action="/odemeler/@_timeline.PaymentId/iptal">
+                <AntiforgeryToken />
+                <label class="check">
+                    <input type="checkbox" name="onay" value="1" required />
+                    İşlemin geri alınamayacağını anladım
+                </label>
+                <button type="submit" class="secondary"
+                        title="Gün sonu öncesi iptal — komisyon doğmaz">İptal (void)</button>
+            </form>
+            <form method="post" action="/odemeler/@_timeline.PaymentId/iade">
+                <AntiforgeryToken />
+                <input type="number" name="amountMinor" min="1" step="1"
+                       placeholder="Tutar (kuruş, boş = tamamı)" />
+                <label class="check">
+                    <input type="checkbox" name="onay" value="1" required />
+                    Paranın karta iade edileceğini anladım
+                </label>
+                <button type="submit" class="secondary">İade et</button>
+            </form>
+        </div>
+    }
+
+    <div class="summary">
+        <div>
+            <span class="label">Durum</span>
+            <span class="badge @Fmt.StatusClass(_timeline.Status)">@Fmt.PaymentStatus(_timeline.Status)</span>
+        </div>
+        <div><span class="label">Mal bedeli</span> @Fmt.Money(_timeline.AmountMinor, _timeline.Currency)</div>
+        <div><span class="label">Taksit</span> @(_timeline.Installments > 1 ? $"{_timeline.Installments}x" : "Tek çekim")</div>
+        <div><span class="label">Oluşturma</span> @Fmt.Date(_timeline.CreatedAt)</div>
+        @if (_timeline.Description is { Length: > 0 } description)
+        {
+            <div><span class="label">Açıklama</span> @description</div>
+        }
+    </div>
+
+    <p class="hint">
+        Bu ödemenin sisteminize giden bildirimleri:
+        <a class="link" href="/webhooklar">Webhook teslimatları →</a>
+    </p>
+
+    @if (_timeline.RoutingResult is { } routing)
+    {
+        <h2>Neden bu POS?</h2>
+        <div class="reason">
+            <p class="lead">@GetString(routing, "reason")</p>
+            <dl>
+                @if (GetString(routing, "rule") is { Length: > 0 } rule)
+                {
+                    <dt>Kural</dt>
+                    <dd>@rule (sürüm @GetString(routing, "rule_version"))</dd>
+                }
+                <dt>Akış</dt>
+                <dd>@(GetString(routing, "flow") is { Length: > 0 } flow ? flow : "hosted")</dd>
+                <dt>Aday hesap</dt>
+                <dd>@(routing.TryGetProperty("candidates", out var c) ? c.GetArrayLength() : 0)</dd>
+            </dl>
+        </div>
+    }
+
+    <h2>Denemeler</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th class="hide-narrow">Zaman</th>
+                    <th>POS</th>
+                    <th class="num">Çekilen</th>
+                    <th>Durum</th>
+                    <th class="hide-narrow">Kart</th>
+                    <th class="hide-narrow">Onay</th>
+                    <th>Sonuç</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var attempt in _timeline.Attempts)
+                {
+                    <tr>
+                        <td>@attempt.AttemptNo</td>
+                        <td class="mono hide-narrow">@Fmt.Date(attempt.CreatedAt)</td>
+                        <td>
+                            @attempt.ConnectorKey
+                            @if (attempt.ConnectorTxnId is { Length: > 0 } txn)
+                            {
+                                @* Banka referansı ihtilafta sorulan ilk numaradır — tam hali DOM'da *@
+                                <div class="hint">
+                                    <span class="mono id-cell" title="@txn">@txn</span>
+                                </div>
+                            }
+                        </td>
+                        <td class="num mono">@Fmt.Money(attempt.AmountMinor, _timeline.Currency)</td>
+                        <td>
+                            <span class="badge @AttemptStatusClass(attempt.Status)">@AttemptStatusText(attempt.Status)</span>
+                        </td>
+                        <td class="mono hide-narrow">@(attempt.MaskedPan ?? "—")</td>
+                        <td class="mono hide-narrow">@(attempt.AuthCode ?? "—")</td>
+                        <td>
+                            @if (attempt.ErrorUnifiedCode is { Length: > 0 } error)
+                            {
+                                <span class="badge err">@Fmt.Error(error)</span>
+                                <div class="hint mono">@attempt.ErrorRawCode @attempt.ErrorRawMessage</div>
+                            }
+                            else
+                            {
+                                <span class="badge ok">—</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <h2>Zaman çizelgesi</h2>
+    <ol class="timeline">
+        @foreach (var entry in _timeline.Events)
+        {
+            <li>
+                <span class="when mono">@Fmt.Date(entry.CreatedAt)</span>
+                <span class="what">@entry.EventType</span>
+                <span class="who">@entry.Actor</span>
+                <pre class="payload wrap">@entry.Payload.ToString()</pre>
+            </li>
+        }
+    </ol>
+}
+
+@code {
+    [Parameter]
+    public string PaymentId { get; set; } = "";
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    private PaymentTimelineDto? _timeline;
+
+    protected override async Task OnParametersSetAsync()
+        => _timeline = await Dispatcher.Ask(new GetPaymentTimelineQuery(PaymentId));
+
+    private static string GetString(JsonElement element, string property)
+        => element.TryGetProperty(property, out var value) && value.ValueKind is not JsonValueKind.Null
+            ? value.ToString()
+            : "";
+
+    private static string AttemptStatusText(string status) => status switch
+    {
+        "created" => "Oluşturuldu",
+        "three_ds_initiated" => "3D Başlatıldı",
+        "captured" => "Tahsil edildi",
+        "failed" => "Başarısız",
+        "voided" => "İptal edildi",
+        _ => status,
+    };
+
+    private static string AttemptStatusClass(string status) => status switch
+    {
+        "captured" => "ok",
+        "failed" => "err",
+        "three_ds_initiated" => "wait",
+        "voided" => "muted",
+        _ => "info",
+    };
+}

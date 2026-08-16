@@ -1,0 +1,367 @@
+@page "/saha"
+@attribute [Authorize]
+@using Poyra.Modules.Field.Features
+@using Poyra.SharedKernel.Tenancy
+@using Poyra.SharedKernel.Time
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>Saha tahsilatı — Poyra</PageTitle>
+
+<h1>Saha tahsilatı</h1>
+<p class="lead">
+    Sahadaki cihaz <strong>beyan eder</strong>, sunucu <strong>karar verir</strong>.
+    Cihaz "tahsil edildi" diyemez — para durumu ödeme akışından, yani burada oluşur.
+</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+<div class="tiles">
+    <div class="tile">
+        <span class="label">Kesinleşen</span>
+        <span class="value">@Fmt.Money(_report.TotalSettledMinor, "TRY")</span>
+        <span class="sub">gerçekten tahsil edildi</span>
+    </div>
+    <div class="tile @(_report.TotalDeclaredCashMinor > 0 ? "warn" : "")">
+        <span class="label">Nakit beyanı</span>
+        <span class="value">@Fmt.Money(_report.TotalDeclaredCashMinor, "TRY")</span>
+        <span class="sub">kasaya teslim edilmeli — Poyra'dan geçmedi</span>
+    </div>
+    <div class="tile">
+        <span class="label">Bekleyen</span>
+        <span class="value">@Fmt.Money(_pendingMinor, "TRY")</span>
+        <span class="sub">bağlantı üretildi, henüz ödenmedi</span>
+    </div>
+    <div class="tile @(_skewed > 0 ? "warn" : "")">
+        <span class="label">Saati bozuk kayıt</span>
+        <span class="value">@_skewed</span>
+        <span class="sub">cihaz beyanı makul pencerenin dışında</span>
+    </div>
+</div>
+
+<p class="hint">
+    <strong>Nakit ve kart ayrı toplanır.</strong> Tek toplamda birleştirmek, hiç
+    görmediğimiz parayı tahsil edilmiş göstermek olurdu: nakit temsilcinin kasaya
+    teslim etmesi gereken meblağdır, mutabakata girmez.
+</p>
+
+<h2>Gün sonu — temsilci özeti</h2>
+
+<form method="get" class="filters">
+    <label>Gün
+        <input type="date" name="gun" value="@_day.ToString("yyyy-MM-dd")" />
+    </label>
+    <button type="submit">Göster</button>
+    <span class="hint">Gün, <strong>TR saatine</strong> (UTC+3) ve sunucu zamanına göredir.</span>
+</form>
+
+@if (_report.Agents.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">@Fmt.DateOnly(_day) günü için saha kaydı yok</p>
+        <p class="es-hint">Başka bir gün seçin ya da temsilcilerin cihazdan senkron göndermesini bekleyin.</p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+    <table>
+        <thead>
+        <tr>
+            <th>Temsilci</th>
+            <th>Bölge</th>
+            <th class="num">Kayıt</th>
+            <th class="num">Nakit beyanı</th>
+            <th class="num">Kesinleşen</th>
+            <th class="num">Bekleyen</th>
+            <th class="num">Başarısız</th>
+            <th class="num">Saat sapması</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var row in _report.Agents)
+        {
+            <tr>
+                <td class="mono">@row.AgentCode</td>
+                <td>@(row.Region ?? "—")</td>
+                <td class="num">@row.Count</td>
+                <td class="num">@Fmt.Money(row.DeclaredCashMinor, "TRY")</td>
+                <td class="num">@Fmt.Money(row.SettledMinor, "TRY")</td>
+                <td class="num">@Fmt.Money(row.PendingMinor, "TRY")</td>
+                <td class="num">@Fmt.Money(row.FailedMinor, "TRY")</td>
+                <td class="num">
+                    @if (row.SkewedCount > 0)
+                    {
+                        <span class="badge warn">@row.SkewedCount</span>
+                    }
+                    else
+                    {
+                        <span>—</span>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+
+<h2>Temsilciler</h2>
+<p class="hint">
+    Temsilci <strong>silinmez, kapatılır</strong>: işten ayrılanın geçmiş tahsilatları
+    sahipsiz kalmamalı. Bir temsilci <strong>tek cihazdan</strong> senkronlar; telefon
+    değişimi yönetici kararıdır, yoksa çalınan bir telefondaki kuyruk başka cihazdan
+    gönderilebilirdi.
+</p>
+
+@if (_canManage)
+{
+    <form method="post" action="/saha/temsilci" class="inline-form">
+        <AntiforgeryToken />
+        <input name="code" placeholder="Kod (ör. BAYI-01)" aria-label="Temsilci kodu" required maxlength="60" />
+        <input name="name" placeholder="Ad soyad" aria-label="Ad soyad" required maxlength="200" />
+        <input name="region" placeholder="Bölge (isteğe bağlı)" aria-label="Bölge" maxlength="100" />
+        <button type="submit">Temsilci ekle</button>
+    </form>
+}
+else
+{
+    <p class="hint">
+        Temsilci tanımlamak için <strong>admin</strong> rolü gerekir — kimin şirket adına
+        saha parası toplayacağına karar vermek yönetim işidir.
+    </p>
+}
+
+@if (_agents.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">Henüz temsilci tanımlanmamış</p>
+        <p class="es-hint">Saha tahsilatı temsilci tanımıyla başlar — admin rolündeki bir kullanıcı
+            yukarıdaki formdan kod, ad ve bölge girerek ekleyebilir.</p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+    <table>
+        <thead>
+        <tr>
+            <th>Kod</th>
+            <th>Ad</th>
+            <th>Bölge</th>
+            <th>Cihaz</th>
+            <th>Son senkron</th>
+            <th>Durum</th>
+            @if (_canManage)
+            {
+                <th></th>
+            }
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var agent in _agents)
+        {
+            <tr class="@(agent.Active ? "" : "muted")">
+                <td class="mono">@agent.Code</td>
+                <td>@agent.Name</td>
+                <td>@(agent.Region ?? "—")</td>
+                <td class="mono">
+                    @if (agent.DeviceId is { Length: > 0 } device)
+                    {
+                        @* Kayıt tarihi yoksa title üretilmez — "01.01.0001" gösterilmez *@
+                        @if (agent.EnrolledAt is { } enrolled)
+                        {
+                            <span title="@($"Kayıt: {Fmt.Date(enrolled)}")">@device</span>
+                        }
+                        else
+                        {
+                            <span>@device</span>
+                        }
+                    }
+                    else
+                    {
+                        <span class="hint">bağlı değil</span>
+                    }
+                </td>
+                <td>@(agent.LastSyncAt is { } sync ? Fmt.Date(sync) : "—")</td>
+                <td>
+                    @if (agent.Active)
+                    {
+                        <span class="badge ok">etkin</span>
+                    }
+                    else
+                    {
+                        <span class="badge" title="@agent.DisabledReason">kapatıldı</span>
+                    }
+                </td>
+                @if (_canManage)
+                {
+                    <td class="row-actions">
+                        @if (agent.Active)
+                        {
+                            @if (agent.DeviceId is { Length: > 0 })
+                            {
+                                <form method="post" action="@($"/saha/temsilci/{agent.Id}/cihaz-birak")">
+                                    <AntiforgeryToken />
+                                    <input name="reason" placeholder="Gerekçe"
+                                           aria-label="Cihazı bırakma gerekçesi" required maxlength="500" />
+                                    <button type="submit">Cihazı bırak</button>
+                                </form>
+                            }
+                            <form method="post" action="@($"/saha/temsilci/{agent.Id}/kapat")">
+                                <AntiforgeryToken />
+                                <input name="reason" placeholder="Gerekçe"
+                                       aria-label="Kapatma gerekçesi" required maxlength="500" />
+                                <button type="submit" class="danger">Kapat</button>
+                            </form>
+                        }
+                        else
+                        {
+                            <span class="hint">@agent.DisabledReason</span>
+                        }
+                    </td>
+                }
+            </tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+
+<h2>Tahsilat kayıtları</h2>
+<p class="hint">
+    <strong>Cihaz beyanı</strong> ile <strong>sunucu zamanı</strong> ayrı kolonlardır.
+    Beyan düzeltilmez — düzeltmek delili yok etmektir. Aradaki fark hem çevrimdışı
+    geçen süreyi hem de bozuk cihaz saatini görünür kılar.
+</p>
+
+@if (_collections.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">@Fmt.DateOnly(_day) gününde tahsilat kaydı yok</p>
+        <p class="es-hint">Kayıtlar, temsilci cihazı senkron gönderdiğinde burada görünür —
+            üstteki gün filtresinden başka bir güne bakabilirsiniz.</p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+    <table>
+        <thead>
+        <tr>
+            <th>Kayıt</th>
+            <th>Temsilci</th>
+            <th>Müşteri</th>
+            <th class="num">Tutar</th>
+            <th>Yöntem</th>
+            <th>Durum</th>
+            <th>Cihaz beyanı</th>
+            <th>Sunucu (yasal)</th>
+            <th class="num">Sapma</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var row in _collections)
+        {
+            <tr>
+                <td class="mono">@row.Id</td>
+                <td class="mono">@row.AgentCode</td>
+                <td>@(row.CustomerRef ?? "—")</td>
+                <td class="num">@Fmt.Money(row.AmountMinor, row.Currency)</td>
+                <td>@MethodText(row.Method)</td>
+                <td><span class="badge @StatusClass(row.Status)">@StatusText(row.Status)</span></td>
+                <td class="hint">@Fmt.Date(row.CapturedAtDevice)</td>
+                <td>@Fmt.Date(row.OccurredAtServer)</td>
+                <td class="num">@SkewText(row.DeviceSkewSeconds)</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    </div>
+}
+
+@code {
+    private FieldSettlementReport _report = new(default, 0, 0, []);
+    private IReadOnlyList<FieldAgentDto> _agents = [];
+    private IReadOnlyList<FieldCollectionDto> _collections = [];
+    private DateOnly _day;
+    private long _pendingMinor;
+    private int _skewed;
+    private bool _canManage;
+
+    [SupplyParameterFromQuery(Name = "gun")]
+    private string? Gun { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canManage = Session.HasRank(TenantRole.Admin);
+
+        _day = DateOnly.TryParse(Gun, out var parsed)
+            ? parsed
+            : TurkeyTime.DayOf(DateTimeOffset.UtcNow);
+
+        _report = await Dispatcher.Ask(new FieldSettlementQuery(_day));
+        _agents = await Dispatcher.Ask(new ListFieldAgentsQuery());
+        _collections = await Dispatcher.Ask(new ListFieldCollectionsQuery(null, null, _day));
+
+        _pendingMinor = _report.Agents.Sum(a => a.PendingMinor);
+        _skewed = _report.Agents.Sum(a => a.SkewedCount);
+    }
+
+    private static string MethodText(string method) => method switch
+    {
+        "link" => "Ödeme bağlantısı",
+        "qr" => "Karekod",
+        "softpos_redirect" => "SoftPOS",
+        "cash_declared" => "Nakit (beyan)",
+        _ => method,
+    };
+
+    private static string StatusText(string status) => status switch
+    {
+        "pending_request" => "Talep açıldı",
+        "link_issued" => "Bağlantı gönderildi",
+        "succeeded" => "Tahsil edildi",
+        "failed" => "Başarısız",
+        "cash_declared" => "Nakit beyanı",
+        "cancelled" => "İptal",
+        _ => status,
+    };
+
+    private static string StatusClass(string status) => status switch
+    {
+        "succeeded" => "ok",
+        "failed" => "err",
+        "cash_declared" => "warn",
+        _ => "",
+    };
+
+    private static string SkewText(long seconds)
+    {
+        var abs = Math.Abs(seconds);
+        if (abs < 60)
+            return "—";
+
+        var span = TimeSpan.FromSeconds(abs);
+        var text = span.TotalDays >= 1
+            ? $"{(int)span.TotalDays} gün"
+            : span.TotalHours >= 1
+                ? $"{(int)span.TotalHours} sa"
+                : $"{(int)span.TotalMinutes} dk";
+
+        return seconds > 0 ? text : $"−{text} (ileri)";
+    }
+}

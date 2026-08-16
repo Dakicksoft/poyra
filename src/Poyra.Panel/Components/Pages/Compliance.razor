@@ -1,0 +1,347 @@
+@page "/uyum"
+@attribute [Authorize]
+@using Poyra.Modules.Compliance.Features
+@using Poyra.Modules.Risk.Features
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+
+<PageTitle>Uyum ve denetim — Poyra</PageTitle>
+
+<h1>Uyum ve denetim</h1>
+<p class="lead">
+    Denetim defteri <strong>değiştirilemez</strong>: veritabanı düzeyinde
+    <span class="mono">UPDATE</span> ve <span class="mono">DELETE</span> yetkisi yoktur.
+    Değiştirilebilen bir denetim izi, denetim izi değildir.
+</p>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+<div class="tiles">
+    <div class="tile">
+        <span class="label">Kayıt (son 200)</span>
+        <span class="value">@_audit.Count</span>
+        <span class="sub">@(_from is { } f ? $"{Fmt.DateOnly(f)} sonrası" : "tüm zamanlar")</span>
+    </div>
+    <div class="tile @(_denied > 0 ? "warn" : "")">
+        <span class="label">Yetkisiz deneme</span>
+        <span class="value">@_denied</span>
+        <span class="sub">rol reddi yaşandı</span>
+    </div>
+    <div class="tile @(_riskFlagged > 0 ? "warn" : "")">
+        <span class="label">Risk işareti</span>
+        <span class="value">@_riskFlagged</span>
+        <span class="sub">engellenen + gözden geçir</span>
+    </div>
+    <div class="tile @(_openReports > 0 ? "warn" : "")">
+        <span class="label">Açık inceleme</span>
+        <span class="value">@_openReports</span>
+        <span class="sub">şüpheli işlem kaydı</span>
+    </div>
+</div>
+
+<h2>Şüpheli işlem incelemeleri</h2>
+<p class="hint">
+    Bu defter <strong>iç incelemenin</strong> kaydıdır. MASAK'a fiili şüpheli işlem
+    bildirimi (ŞİB) <strong>lisanslı ödeme kuruluşunun</strong> yükümlülüğüdür ve
+    Poyra üzerinden yapılmaz — burada karar ve gerekçe belgelenir.
+</p>
+
+@if (_reports.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">Şüpheli işlem incelemesi yok</p>
+        <p class="es-hint">Şüpheli gördüğünüz ödemeler için aşağıdaki "İnceleme aç" formuyla
+            kayıt açılır (en az auditor rolü gerekir); karar ve gerekçe burada belgelenir.</p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Kayıt</th>
+                    <th>Müşteri</th>
+                    <th>Ödemeler</th>
+                    <th>Durum</th>
+                    <th>Gerekçe</th>
+                    <th>Açılış</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var report in _reports)
+                {
+                    <tr>
+                        <td class="mono" title="@report.Id"><span class="id-cell">@report.Id</span></td>
+                        <td>@(report.CustomerRef ?? "—")</td>
+                        <td class="mono">
+                            @foreach (var payId in report.PaymentIds.Split(',',
+                                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                            {
+                                <a class="id-cell" href="/odemeler/@payId" title="@payId">@payId</a>
+                            }
+                        </td>
+                        <td>
+                            <span class="badge @ReportClass(report.Status)">@ReportText(report.Status)</span>
+                            @if (report.Resolution is { Length: > 0 } resolution)
+                            {
+                                <div class="hint">@Shorten(resolution, 60)</div>
+                            }
+                        </td>
+                        <td>@Shorten(report.Rationale, 80)</td>
+                        <td class="mono">@Fmt.Date(report.CreatedAt)</td>
+                        <td class="row-actions wrap">
+                            @if (_canResolve && report.Status == "under_review")
+                            {
+                                <form method="post" action="/uyum/inceleme/@report.Id/sonuclandir">
+                                    <AntiforgeryToken />
+                                    <textarea name="resolution" required rows="2" maxlength="4000"
+                                              aria-label="Karar gerekçesi"
+                                              placeholder="Karar gerekçesi — örn. 'İnceleme sonucu bildirime gerek görülmedi.' ya da 'Bildirime karar verildi: …'"></textarea>
+                                    <label class="check">
+                                        <input type="checkbox" name="onay" value="1" required />
+                                        Kararın ve gerekçenin deftere kalıcı işleneceğini anladım
+                                    </label>
+                                    <button type="submit" name="status" value="dismissed" class="link">Bildirime gerek yok</button>
+                                    <button type="submit" name="status" value="ready_to_file" class="link danger">Bildirilecek</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_canResolve)
+{
+    <h3>İnceleme aç</h3>
+    <form method="post" action="/uyum/inceleme" class="filters">
+        <AntiforgeryToken />
+        <label>
+            Ödeme kimlikleri (virgülle)
+            <input type="text" name="paymentIds" required placeholder="pay_…, pay_…" />
+        </label>
+        <label>
+            Müşteri referansı
+            <input type="text" name="customerRef" maxlength="100" />
+        </label>
+        <label>
+            Şüphe gerekçesi
+            <input type="text" name="rationale" required maxlength="500"
+                   placeholder="Örn. Kısa sürede çok sayıda farklı kartla yüksek tutarlı işlem." />
+        </label>
+        <button type="submit" class="primary">Kayıt aç</button>
+    </form>
+}
+
+<h2>Denetim defteri</h2>
+<form method="get" class="filters">
+    <label>
+        Başlangıç
+        <input type="date" name="baslangic" value="@From" />
+    </label>
+    <label>
+        Bitiş
+        <input type="date" name="bitis" value="@To" />
+    </label>
+    <label>
+        Aktör
+        <input type="text" name="aktor" value="@Aktor" placeholder="user:… / api_key" />
+    </label>
+    <label>
+        Kaynak
+        <select name="kaynak" onchange="this.form.submit()">
+            <option value="">Tümü</option>
+            @foreach (var resource in Resources)
+            {
+                <option value="@resource" selected="@(Kaynak == resource)">@ResourceText(resource)</option>
+            }
+        </select>
+    </label>
+    <button type="submit" class="ghost">Filtrele</button>
+    <a class="ghost" href="@ExportUrl()">CSV indir</a>
+</form>
+
+@if (_audit.Count == 0)
+{
+    <div class="empty-state">
+        <p class="es-title">Bu filtreyle denetim kaydı bulunamadı</p>
+        <p class="es-hint">Tarih aralığını genişletin ya da aktör/kaynak filtresini temizleyin —
+            panel ve API üzerindeki her yönetim eylemi buraya işlenir.</p>
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Zaman (TR)</th>
+                    <th>Aktör</th>
+                    <th>Eylem</th>
+                    <th>Kaynak</th>
+                    <th>Özet</th>
+                    <th>IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var entry in _audit)
+                {
+                    <tr class="@(entry.Action.EndsWith(".denied") ? "denied-row" : "")">
+                        <td class="mono">@Fmt.Date(entry.CreatedAt)</td>
+                        <td class="mono">@ActorText(entry.Actor)</td>
+                        <td>
+                            <span class="badge @(entry.Action.EndsWith(".denied") ? "err" : "info")">
+                                @entry.Action
+                            </span>
+                        </td>
+                        <td>
+                            @ResourceText(entry.ResourceType)
+                            @if (entry.ResourceId is { Length: > 0 } id)
+                            {
+                                <div class="hint mono">@Shorten(id, 20)</div>
+                            }
+                        </td>
+                        <td>@entry.Summary</td>
+                        <td class="mono">@(entry.IpAddress ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (_audit.Count >= AuditLimit)
+    {
+        <div class="alert warn" role="status">
+            Liste @AuditLimit kayıtta kesildi — daha eski kayıtlar için tarih filtresiyle daraltın
+            ya da CSV dışa aktarımı kullanın.
+        </div>
+    }
+}
+
+@code {
+    private const int AuditLimit = 200;
+
+    private static readonly string[] Resources =
+    [
+        "connector_account", "routing_rule", "risk_rule_set", "blocklist_entry",
+        "user", "api_key", "branding", "installment_scheme", "webhook_endpoint",
+        "refund", "dispute", "card_token", "plan", "subscription", "recon", "compliance",
+    ];
+
+    private IReadOnlyList<AuditEntryDto> _audit = [];
+    private IReadOnlyList<SuspiciousReportDto> _reports = [];
+    private int _denied;
+    private int _riskFlagged;
+    private int _openReports;
+    private DateOnly? _from;
+    private bool _canResolve;
+
+    [SupplyParameterFromQuery(Name = "baslangic")]
+    private string? From { get; set; }
+
+    [SupplyParameterFromQuery(Name = "bitis")]
+    private string? To { get; set; }
+
+    [SupplyParameterFromQuery(Name = "aktor")]
+    private string? Aktor { get; set; }
+
+    [SupplyParameterFromQuery(Name = "kaynak")]
+    private string? Kaynak { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canResolve = Session.HasRank(TenantRole.Auditor);
+
+        _from = DateOnly.TryParse(From, out var from) ? from : null;
+        var to = DateOnly.TryParse(To, out var parsedTo) ? parsedTo : (DateOnly?)null;
+
+        _audit = await Dispatcher.Ask(new ListAuditQuery(
+            string.IsNullOrWhiteSpace(Aktor) ? null : Aktor.Trim(),
+            null,
+            string.IsNullOrEmpty(Kaynak) ? null : Kaynak,
+            null, _from, to, AuditLimit));
+
+        _denied = _audit.Count(e => e.Action.EndsWith(".denied"));
+
+        _reports = await Dispatcher.Ask(new ListSuspiciousReportsQuery(null));
+        _openReports = _reports.Count(r => r.Status == "under_review");
+
+        var assessments = await Dispatcher.Ask(new ListRiskAssessmentsQuery(null, null, 200));
+        _riskFlagged = assessments.Count(a => a.Outcome is "block" or "review");
+    }
+
+    private string ExportUrl()
+    {
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(From)) query.Add($"from={From}");
+        if (!string.IsNullOrWhiteSpace(To)) query.Add($"to={To}");
+        if (!string.IsNullOrWhiteSpace(Aktor)) query.Add($"actor={Uri.EscapeDataString(Aktor)}");
+        if (!string.IsNullOrWhiteSpace(Kaynak)) query.Add($"resourceType={Kaynak}");
+
+        return "/uyum/disa-aktar" + (query.Count > 0 ? "?" + string.Join("&", query) : "");
+    }
+
+    private static string ActorText(string actor)
+        => actor == "api_key" ? "API anahtarı"
+            : actor == "system" ? "Sistem"
+            : actor.StartsWith("user:") ? actor[5..][..Math.Min(8, actor.Length - 5)] + "…"
+            : actor;
+
+    private static string ResourceText(string resource) => resource switch
+    {
+        "connector_account" => "POS hesabı",
+        "routing_rule" => "Rota kuralı",
+        "risk_rule_set" => "Risk kuralı",
+        "blocklist_entry" => "Kara liste",
+        "user" => "Kullanıcı",
+        "api_key" => "API anahtarı",
+        "branding" => "Marka",
+        "installment_scheme" => "Taksit şeması",
+        "webhook_endpoint" => "Webhook",
+        "refund" => "İade",
+        "dispute" => "İtiraz",
+        "card_token" => "Kasa kartı",
+        "plan" => "Plan",
+        "subscription" => "Abonelik",
+        "recon" => "Mutabakat",
+        "compliance" => "Uyum",
+        _ => resource,
+    };
+
+    private static string ReportText(string status) => status switch
+    {
+        "under_review" => "İnceleniyor",
+        "dismissed" => "Bildirime gerek yok",
+        "ready_to_file" => "Bildirilecek",
+        "filed" => "Bildirildi",
+        _ => status,
+    };
+
+    private static string ReportClass(string status) => status switch
+    {
+        "filed" => "err",
+        "ready_to_file" => "warn",
+        "dismissed" => "muted",
+        _ => "info",
+    };
+
+    private static string Shorten(string value, int max = 40)
+        => value.Length <= max ? value : value[..max] + "…";
+}

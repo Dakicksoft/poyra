@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Poyra.Api\Poyra.Api.csproj" />
+    <ProjectReference Include="..\..\src\Poyra.Panel\Poyra.Panel.csproj" />
+    <ProjectReference Include="..\..\src\Poyra.Checkout\Poyra.Checkout.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.Playwright" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Uygulama rolü betiği KOPYALANIR, elle çoğaltılmaz: test ettiğimiz rol modeli
+         üretimde koşanın aynısı olsun. Kopya tutulsaydı biri güncellenip diğeri
+         unutulduğunda RLS testleri yanlış zeminde koşardı. -->
+    <None Include="..\..\docker\initdb\01-app-role.sql" Link="01-app-role.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

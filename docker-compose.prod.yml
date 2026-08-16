@@ -1,0 +1,116 @@
+# Poyra — self-host üretim kompozisyonu.
+#
+# Kullanım:
+#   cp .env.example .env && ./scripts/anahtar-uret.sh >> .env   # sırları üret
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# TLS bilinçli olarak BURADA YOK: sertifika yönetimi kuruluşa göre değişir (Caddy,
+# nginx, Traefik, load balancer). Üç host da 8080'de düz HTTP dinler;
+# önlerine ters vekil koyun ve X-Forwarded-* başlıklarını iletin.
+#
+# ÖNEMLİ: veritabanı dışarıya AÇILMAZ (ports yok, yalnız iç ağ). Yedek ve bakım için
+# `docker compose exec postgres psql` kullanın.
+
+# Proje adı geliştirmeden AYRIDIR: aynı adı kullanmak, üretim yığınının geliştirme
+# veritabanı birimini sessizce devralmasına yol açar.
+name: poyra-prod
+
+x-app-env: &app-env
+  ASPNETCORE_ENVIRONMENT: Production
+  ConnectionStrings__Poyra: "Host=postgres;Database=${POSTGRES_DB:-poyra};Username=poyra_app;Password=${POYRA_APP_PASSWORD:?zorunlu}"
+  ConnectionStrings__PoyraMigrations: "Host=postgres;Database=${POSTGRES_DB:-poyra};Username=poyra;Password=${POSTGRES_PASSWORD:?zorunlu}"
+  Poyra__CredentialKey: ${POYRA_CREDENTIAL_KEY:?zorunlu}
+  Poyra__JwtKey: ${POYRA_JWT_KEY:?zorunlu}
+  Poyra__VaultKey: ${POYRA_VAULT_KEY:?zorunlu}
+  Poyra__PublicBaseUrl: ${POYRA_PUBLIC_BASE_URL:?zorunlu}
+  Poyra__PanelBaseUrl: ${POYRA_PANEL_BASE_URL:?zorunlu}
+  Poyra__CheckoutBaseUrl: ${POYRA_CHECKOUT_BASE_URL:?zorunlu}
+  Platform__AdminKey: ${POYRA_PLATFORM_ADMIN_KEY:?zorunlu}
+  Poyra__Smtp__Host: ${SMTP_HOST:-}
+  Poyra__Smtp__Port: ${SMTP_PORT:-587}
+  Poyra__Smtp__Username: ${SMTP_USERNAME:-}
+  Poyra__Smtp__Password: ${SMTP_PASSWORD:-}
+  Poyra__Smtp__From: ${SMTP_FROM:-}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: poyra            # sahip rol — YALNIZ migration koşar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?zorunlu}
+      POSTGRES_DB: ${POSTGRES_DB:-poyra}
+      POYRA_APP_PASSWORD: ${POYRA_APP_PASSWORD:?zorunlu}
+    volumes:
+      - poyra_prod_pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poyra -d ${POSTGRES_DB:-poyra}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # ports YOK: veritabanı yalnız iç ağdan erişilir
+
+  # Migration'lar AYRI bir işte koşar ve biter. Uygulama açılışında migrate etmek,
+  # birden çok kopya aynı anda kalkarken yarışa ve yarım şemaya yol açar.
+  migrate:
+    build:
+      context: .
+      dockerfile: src/Poyra.Api/Dockerfile
+    restart: "no"
+    environment:
+      <<: *app-env
+      Database__AutoMigrate: "true"
+      Poyra__MigrateOnly: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Poyra.Api/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      Database__AutoMigrate: "false"   # şemayı migrate işi kurar
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${API_PORT:-5080}:8080"   # yalnız localhost; dışarıya reverse proxy açar
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  panel:
+    build:
+      context: .
+      dockerfile: src/Poyra.Panel/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${PANEL_PORT:-5090}:8080"
+
+  checkout:
+    build:
+      context: .
+      dockerfile: src/Poyra.Checkout/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${CHECKOUT_PORT:-5095}:8080"
+
+volumes:
+  poyra_prod_pgdata:

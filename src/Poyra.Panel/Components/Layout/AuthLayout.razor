@@ -1,0 +1,32 @@
+@inherits LayoutComponentBase
+
+<div class="auth">
+    <aside class="auth-brand">
+        <div class="auth-brand-inner">
+            <div class="brand">
+                <span class="hub" aria-hidden="true"></span>
+                <span class="wordmark">poyra</span>
+            </div>
+
+            <HubArt />
+
+            <h1 class="auth-headline">Tüm ödeme yolları<br />tek göbekte.</h1>
+            <p class="auth-sub">
+                Banka, taksit, mutabakat ve saha tahsilatı aynı yerde. Hangi POS'tan
+                geçtiğini <strong>ve neden</strong> geçtiğini görürsünüz.
+            </p>
+
+            <ul class="auth-points">
+                <li>Akıllı rota — en ucuz, en yüksek onay ya da en hızlı</li>
+                <li>Banka ekstresiyle kuruşu kuruşuna mutabakat</li>
+                <li>Kesilen komisyon anlaşmadan farklıysa raporlanır</li>
+            </ul>
+        </div>
+    </aside>
+
+    <main class="auth-form">
+        <div class="auth-form-inner">
+            @Body
+        </div>
+    </main>
+</div>

@@ -1,0 +1,82 @@
+@page "/giris"
+@layout AuthLayout
+@using Microsoft.AspNetCore.Components.Web
+@attribute [AllowAnonymous]
+
+<PageTitle>Giriş — Poyra</PageTitle>
+
+<div class="login">
+    <h2 class="auth-title">Giriş yapın</h2>
+    <p class="auth-lead">İşyeri panelinize erişmek için hesabınızla girin.</p>
+
+
+    @if (SonucText(Sonuc) is { } sonucMesaj)
+    {
+        <div class="alert ok" role="status">@sonucMesaj</div>
+    }
+    @if (HataText(Hata) is { } hataMesaj)
+    {
+        <div class="alert err" role="alert">@hataMesaj</div>
+    }
+
+    <form method="post" action="/giris" class="card">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+
+        <label>
+            E-posta
+            <input type="email" name="email" value="@Eposta" required autocomplete="username" autofocus />
+        </label>
+
+        <div class="alan">
+            <label for="giris-parola">Parola</label>
+            <input id="giris-parola" type="password" name="password" required
+                   autocomplete="current-password" />
+            <button type="button" class="link" aria-label="Parolayı göster veya gizle"
+                    onclick="var p=this.previousElementSibling;p.type=p.type==='password'?'text':'password';this.textContent=p.type==='password'?'Göster':'Gizle'">
+                Göster
+            </button>
+        </div>
+
+        <label>
+            İşyeri kodu (birden çok işyeriniz varsa)
+            <input type="text" name="tenantSlug" placeholder="örn. deneme" autocomplete="organization" />
+        </label>
+
+        <button type="submit" class="primary">Giriş yap</button>
+    </form>
+
+    <p class="login-links"><a href="/parola-unuttum">Parolamı unuttum</a></p>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    [SupplyParameterFromQuery(Name = "eposta")]
+    private string? Eposta { get; set; }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? ReturnUrl { get; set; }
+
+    private static string? HataText(string? kod) => kod switch
+    {
+        null or "" => null,
+        "gecersiz-kimlik" => "E-posta veya parola hatalı.",
+        "uyelik-yok" => "Hesabınızın aktif bir işyeri üyeliği yok.",
+        "isyeri-uyusmuyor" => "Bu işyeri kodunda üyeliğiniz yok — kodu kontrol edin.",
+        "isyeri-kodu-gerekli" => "Birden çok işyeri üyeliğiniz var — işyeri kodunuzu da girin.",
+        _ => "İşlem tamamlanamadı. Lütfen yeniden deneyin.",
+    };
+
+    private static string? SonucText(string? kod) => kod switch
+    {
+        null or "" => null,
+        "sifirlama-gonderildi" => "Adres kayıtlıysa parola sıfırlama bağlantısı gönderildi. Gelen kutunuzu kontrol edin.",
+        "parola-guncellendi" => "Parolanız değiştirildi ve açık oturumlarınız kapatıldı. Yeni parolanızla giriş yapın.",
+        _ => "İşlem tamamlandı.",
+    };
+}

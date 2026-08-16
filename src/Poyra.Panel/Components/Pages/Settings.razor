@@ -1,0 +1,262 @@
+@page "/ayarlar"
+@attribute [Authorize]
+@using Poyra.Modules.PaymentLinks.Features
+@using Poyra.Modules.Recon.Features
+@using Poyra.Modules.Tenancy.Features.Branding
+@using Poyra.SharedKernel.Tenancy
+@inject IDispatcher Dispatcher
+@inject PanelPrincipalBinder Session
+@inject IConfiguration Configuration
+
+<PageTitle>Ayarlar — Poyra</PageTitle>
+
+<h1>Ayarlar</h1>
+
+@if (PanelFlash.Reveal(Sonuc) is { } sonucMesaj)
+{
+    <div class="alert ok" role="status">@sonucMesaj</div>
+}
+@if (PanelFlash.Reveal(Hata) is { } hataMesaj)
+{
+    <div class="alert err" role="alert">@hataMesaj</div>
+}
+
+<h2>Ödeme sayfası markası</h2>
+<p class="lead">
+    Müşteri ödeme sayfasında <strong>Poyra'yı değil sizi</strong> görmeli. Tanımadığı bir
+    marka gören müşteri ödemeyi bırakır ya da bankaya "tanımadığım işlem" der.
+</p>
+
+@if (_canManageBranding)
+{
+    <form method="post" action="/ayarlar/marka" enctype="multipart/form-data" class="filters">
+        <AntiforgeryToken />
+        <label>
+            Görünen ad
+            <input type="text" name="displayName" maxlength="120" value="@_branding?.DisplayName"
+                   placeholder="Örn. Poyra Mağazacılık" />
+        </label>
+        <label>
+            Marka rengi
+            <input type="color" name="primaryColor" value="@(_branding?.PrimaryColor ?? "#C4713B")" />
+        </label>
+        <label>
+            Destek e-postası
+            <input type="email" name="supportEmail" value="@_branding?.SupportEmail" />
+        </label>
+        <label>
+            Destek telefonu
+            <input type="text" name="supportPhone" maxlength="32" value="@_branding?.SupportPhone" />
+        </label>
+        <label>
+            Kendi ödeme alan adınız
+            <input type="text" name="checkoutDomain" value="@_branding?.CheckoutDomain"
+                   placeholder="odeme.magaza.com" />
+        </label>
+        <label>
+            Logo (PNG, JPEG, SVG veya WebP — en çok 256 KB)
+            <input type="file" name="logo" accept="image/png,image/jpeg,image/svg+xml,image/webp" />
+        </label>
+        <button type="submit" class="primary">Markayı kaydet</button>
+    </form>
+
+    @if (_branding?.HasLogo == true)
+    {
+        @* form <p> içinde geçersiz HTML olurdu — div içinde kardeş eleman olarak durur *@
+        <div class="hint actions">
+            <span>Logo yüklü.</span>
+            <form method="post" action="/ayarlar/marka/logo-sil">
+                <AntiforgeryToken />
+                <button type="submit" class="link danger">Logoyu kaldır — geri alınamaz</button>
+            </form>
+        </div>
+    }
+}
+else
+{
+    <p class="hint">
+        Marka ayarını değiştirmek için <strong>admin</strong> rolü gerekir — müşteriye görünen
+        yüz yönetim kararıdır. Geçerli ayarlar aşağıdaki önizlemede.
+    </p>
+}
+
+<h3>Ödeme sayfası önizlemesi</h3>
+@{
+    var onizlemeRenk = _branding?.PrimaryColor ?? "#C4713B";
+    var onizlemeAd = _branding?.DisplayName is { Length: > 0 } gorunenAd ? gorunenAd : Session.TenantName;
+}
+<div class="card" style="max-width: 24rem">
+    <div style="display:flex; align-items:center; gap:.6rem; margin-bottom:.8rem">
+        @if (_logoUrl is { Length: > 0 })
+        {
+            <img src="@_logoUrl" alt="İşyeri logosu"
+                 style="max-height:36px; max-width:120px; object-fit:contain" />
+        }
+        <strong>@onizlemeAd</strong>
+    </div>
+    <button type="button" disabled
+            style="width:100%; background:@onizlemeRenk; color:#fff; border:0; border-radius:8px; padding:.6rem 1rem; cursor:default">
+        249,99 ₺ öde
+    </button>
+    <p class="hint" style="margin:.6rem 0 0">
+        Müşterinin ödeme sayfasında göreceği ad, logo ve düğme rengi.
+        @if (_branding?.SupportEmail is { Length: > 0 } destek)
+        {
+            <span>Destek: <span class="mono">@destek</span></span>
+        }
+    </p>
+</div>
+@if (_branding?.CheckoutDomain is { Length: > 0 } domain)
+{
+    <p class="hint">
+        <strong>@domain</strong> için DNS ve TLS altyapı işidir: bu alan adını Poyra checkout
+        host'una yönlendirin; uygulama alan adını yalnız işyerinize eşler.
+    </p>
+}
+
+<h2>ERP dışa aktarımı</h2>
+<p class="lead">
+    Gün sonu mutabakatı, muhasebe programınıza <strong>hazır fiş</strong> olarak çıkar.
+    Hesap kodları tahmin edilmez — Tekdüzen Hesap Planı'ndaki kendi kırılımınızı yazın.
+</p>
+
+@if (_canManageErp)
+{
+    <form method="post" action="/ayarlar/erp" class="filters">
+        <AntiforgeryToken />
+        <label>
+            Biçim
+            <select name="format">
+                @foreach (var (value, label) in Formats)
+                {
+                    <option value="@value" selected="@(_erp?.Format == value)">@label</option>
+                }
+            </select>
+        </label>
+        <label>
+            POS alacakları (108)
+            <input type="text" name="posReceivableAccount" value="@(_erp?.PosReceivableAccount ?? "108.01")" />
+        </label>
+        <label>
+            Bankalar (102)
+            <input type="text" name="bankAccount" value="@(_erp?.BankAccount ?? "102.01")" />
+        </label>
+        <label>
+            Komisyon gideri (653)
+            <input type="text" name="commissionExpenseAccount" value="@(_erp?.CommissionExpenseAccount ?? "653.01")" />
+        </label>
+        <label>
+            Fiş öneki
+            <input type="text" name="documentPrefix" maxlength="10" value="@(_erp?.DocumentPrefix ?? "POS")" />
+        </label>
+        <button type="submit" class="primary">ERP ayarını kaydet</button>
+    </form>
+}
+else
+{
+    <p class="hint">
+        ERP ayarını değiştirmek için en az <strong>finance</strong> rolü gerekir.
+        Geçerli ayar: <span class="mono">@(_erp?.Format ?? "poyra_csv")</span> biçimi,
+        hesaplar <span class="mono">@(_erp?.PosReceivableAccount ?? "108.01")</span> /
+        <span class="mono">@(_erp?.BankAccount ?? "102.01")</span> /
+        <span class="mono">@(_erp?.CommissionExpenseAccount ?? "653.01")</span>,
+        fiş öneki <span class="mono">@(_erp?.DocumentPrefix ?? "POS")</span>.
+    </p>
+}
+
+<h2>TR Karekod</h2>
+<p class="lead">
+    Müşteri kendi banka uygulamasıyla karekodu okutup öder. Tanımlayıcılar
+    <strong>bankanızdan</strong> gelir — Poyra yalnız standart yükü kurar.
+    Eksik ayarla üretilen karekodu hiçbir banka uygulaması okumaz.
+</p>
+
+@if (_karekod is { Configured: false })
+{
+    <div class="alert warn" role="status">
+        Karekod henüz kullanılamıyor: şema tanımlayıcısı ve üye işyeri numarası eksik.
+    </div>
+}
+
+@if (_canManageKarekod)
+{
+    <form method="post" action="/ayarlar/karekod" class="filters">
+        <AntiforgeryToken />
+        <label>
+            Şema tanımlayıcısı
+            <input type="text" name="schemeGuid" maxlength="32" value="@_karekod?.SchemeGuid"
+                   placeholder="bankanızın verdiği değer" />
+        </label>
+        <label>
+            Üye işyeri no
+            <input type="text" name="merchantNo" maxlength="32" value="@_karekod?.MerchantNo" />
+        </label>
+        <label>
+            İşyeri kategori kodu (MCC)
+            <input type="text" name="categoryCode" maxlength="4" value="@_karekod?.CategoryCode"
+                   placeholder="5411" />
+        </label>
+        <label>
+            Karekod'da görünen ad
+            <input type="text" name="merchantName" maxlength="25" value="@_karekod?.MerchantName" />
+        </label>
+        <label>
+            Şehir
+            <input type="text" name="merchantCity" maxlength="15" value="@_karekod?.MerchantCity"
+                   placeholder="ISTANBUL" />
+        </label>
+        <button type="submit" class="primary">Karekod ayarını kaydet</button>
+    </form>
+}
+else
+{
+    <p class="hint">
+        Karekod ayarını değiştirmek için <strong>admin</strong> rolü gerekir — yanlış
+        tanımlayıcıyla üretilen karekodu hiçbir banka uygulaması okumaz.
+    </p>
+}
+<p class="hint">
+    Canlıya çıkmadan önce üretilen ham yükü bankanızın karekod test setiyle doğrulayın:
+    <span class="mono">GET /v1/payment-links/{id}/karekod</span>
+</p>
+
+@code {
+    private static readonly (string Value, string Label)[] Formats =
+    [
+        ("poyra_csv", "Poyra CSV (adlandırılmış alanlar)"),
+        ("logo_csv", "Logo (Tiger/Go)"),
+        ("mikro_csv", "Mikro (Jump/V16)"),
+    ];
+
+    private BrandingDto? _branding;
+    private ErpSettingsDto? _erp;
+    private KarekodSettingsDto? _karekod;
+    private string? _logoUrl;
+
+    private bool _canManageBranding;
+    private bool _canManageErp;
+    private bool _canManageKarekod;
+
+    [SupplyParameterFromQuery(Name = "sonuc")]
+    private string? Sonuc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "hata")]
+    private string? Hata { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _canManageBranding = Session.HasRank(TenantRole.Admin);
+        _canManageErp = Session.HasRank(TenantRole.Finance);
+        _canManageKarekod = Session.HasRank(TenantRole.Admin);
+
+        _branding = await Dispatcher.Ask(new GetBrandingQuery());
+        _erp = await Dispatcher.Ask(new GetErpSettingsQuery());
+        _karekod = await Dispatcher.Ask(new GetKarekodSettingsQuery());
+
+        _logoUrl = _branding?.HasLogo == true
+                   && Configuration["Poyra:CheckoutBaseUrl"] is { Length: > 0 } checkoutBase
+                   && Session.TenantSlug is { Length: > 0 } slug
+            ? $"{checkoutBase.TrimEnd('/')}/l/{slug}/logo"
+            : null;
+    }
+}

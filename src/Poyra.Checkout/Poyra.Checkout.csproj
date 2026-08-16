@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Poyra.SharedKernel\Poyra.SharedKernel.csproj" />
+    <ProjectReference Include="..\Poyra.Persistence\Poyra.Persistence.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.Tenancy\Poyra.Modules.Tenancy.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.Connectors\Poyra.Modules.Connectors.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.Routing\Poyra.Modules.Routing.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.Webhooks\Poyra.Modules.Webhooks.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.Installments\Poyra.Modules.Installments.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.Vault\Poyra.Modules.Vault.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.Payments\Poyra.Modules.Payments.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.Recon\Poyra.Modules.Recon.csproj" />
+    <ProjectReference Include="..\Modules\Poyra.Modules.PaymentLinks\Poyra.Modules.PaymentLinks.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hangfire.AspNetCore" />
+    <PackageReference Include="Hangfire.PostgreSql" />
+  </ItemGroup>
+
+</Project>
