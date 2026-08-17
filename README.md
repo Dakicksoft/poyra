@@ -2,7 +2,7 @@
 
 # ⚙️ Poyra
 
-**Türkiye pazarı için açık kaynak ödeme orkestrasyonu ve ödeme muhasebesi platformu**
+**Türkiye'nin açık kaynak ödeme mühendisliği platformu** — orkestrasyondan kuruşu kuruşuna ödeme muhasebesine
 
 *Poyra "tekerlek göbeği" demektir: bütün ödeme yolları dışarıdan gelir, tek göbekte birleşir.*
 
@@ -11,7 +11,7 @@
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-336791)](https://www.postgresql.org/)
 [![Testler](https://img.shields.io/badge/testler-900%20ge%C3%A7ti-brightgreen)](#testler)
 
-[Ekran görüntüleri](#ekran-görüntüleri) · [Özellikler](#özellikler) · [Konnektörler](#konnektörler) · [Mimari](#mimari) · [Akışlar](#akışlar) · [Kurulum](#hızlı-başlangıç-geliştirme-ortamı) · [Geliştirme](#geliştirme-rehberi) · [Yol haritası](#yol-haritası) · [Lisans](#lisans)
+[Karşılaştırma](#türkiyedeki-alternatifler) · [Ekran görüntüleri](#ekran-görüntüleri) · [Özellikler](#özellikler) · [Konnektörler](#konnektörler) · [Mimari](#mimari) · [Akışlar](#akışlar) · [Kurulum](#hızlı-başlangıç-geliştirme-ortamı) · [Geliştirme](#geliştirme-rehberi) · [Yol haritası](#yol-haritası) · [Lisans](#lisans)
 
 </div>
 
@@ -47,6 +47,21 @@ bankadan para geri gelene kadar takip eder.
 | Denetlenebilirlik | Log | **Silinemez operasyon kütüğü:** olay defterlerinde `UPDATE/DELETE` hakkı veritabanı düzeyinde yoktur — kayıt iptal edilir, silinmez |
 | Dağıtım | Yalnız SaaS | **Self-host:** üç Dockerfile + üretim kompozisyonu; verisini dışarı veremeyen kurumlar kendi bünyesinde çalıştırır |
 
+### Alternatifler
+
+| | Poyra | Craftgate | Treps | Paywall | Tahsildar | Payten PG | iyzico · PayTR · Param | Netahsilat (Finrota) | mews/pos |
+|---|---|---|---|---|---|---|---|---|---|
+| Model | Açık kaynak orkestrasyon + **ödeme muhasebesi** | SaaS orkestrasyon | SaaS orkestrasyon + finansal operasyon | SaaS orkestrasyon | SaaS orkestrasyon | SaaS orkestrasyon + gateway (MSU/Paratika) | Ödeme kuruluşu (tek sözleşme) | SaaS e-tahsilat | PHP entegrasyon kütüphanesi |
+| Açık kaynak · self-host | ✅ AGPL-3.0, Docker ile kendi sunucunda | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ MIT — kütüphane, platform değil |
+| Çoklu POS yönlendirme + failover | ✅ kural DSL + stratejiler | ✅ | ✅ | ✅ en düşük maliyetli rota | ✅ en düşük komisyona yönlendirme | ✅ Smart Switch | ❌ tek sağlayıcı | kısmen — çoklu sanal POS tek panelde | ❌ elle yazarsınız |
+| Açıklanabilir yönlendirme (simülatör, "neden bu POS?") | ✅ | — | — | — | — | — | — | — | ❌ |
+| Üç yönlü mutabakat (defter ↔ POS ekstresi ↔ banka MT940) | ✅ | — | kısmen — mutabakat modülü | — | — | kısmen — otomatik mutabakat/raporlama | — | kısmen — Posrapor POS raporlama | ❌ |
+| Komisyon denetimi + itiraz takibi | ✅ kuruş toleranssız, "Bankaya İtiraz Raporu" | — | — | — | — | — | — | — | ❌ |
+| Valör kaybını liraya çevirme | ✅ | — | — | — | — | — | — | — | ❌ |
+| Taksit + vade farkı motoru | ✅ bankacı yuvarlaması | ✅ | ✅ | ✅ | ✅ 1–12 taksit | ✅ | ✅ | ✅ | kısmen — taksit parametresi |
+| Abonelik + dunning | ✅ maaş takvimli akıllı dunning | ✅ | — | ✅ tekrarlı ödeme + kart saklama | — | ✅ tokenizasyon + tekrarlayan ödeme | ✅ (iyzico) | kısmen — borç bildirimi (e-posta/SMS) | kısmen — recurring |
+| Saha tahsilatı (çevrimdışı mobil) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | kısmen — SMS/link ile çevrimiçi | ❌ |
+| Ücretlendirme | Self-host ücretsiz | SaaS | SaaS | SaaS | SaaS — %2,99'dan başlayan komisyon | SaaS | işlem komisyonu | SaaS | ücretsiz |
 
 ## Ekran görüntüleri
 
