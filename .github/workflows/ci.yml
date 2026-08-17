@@ -1,0 +1,99 @@
+# Poyra CI — iki aşamalı.
+#
+# 1) hizli : birim + mimari/PCI bekçileri. Docker gerekmez, ~1 dakika. Kırmızıysa
+#            pahalı katman hiç koşmaz.
+# 2) tam   : gerçek Postgres 18 (Testcontainers) + gerçek tarayıcı (Playwright) +
+#            kapsam KAPISI. Kapı bir hedef değil GERİLEME bekçisidir: testsiz kod
+#            eklenince oran düşer ve PR kırılır.
+name: CI
+
+on:
+  # feature/* dalları bilerek YOK: onların PR'ı zaten develop'a açılır ve aşağıdaki
+  # pull_request tetikleyicisiyle koşar. İkisi birden olsaydı her itmede CI iki kez koşardı.
+  push:
+    branches: [main, develop, 'release/**', 'hotfix/**']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Aynı dalda yeni itme gelirse eskisini iptal et — runner boşa çalışmasın.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  hizli:
+    name: Hızlı katman (birim + mimari)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: NuGet önbelleği
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Birim + mimari testleri
+        run: ./scripts/test-hizli.sh
+
+  tam:
+    name: Tam süit + kapsam kapısı
+    needs: hizli
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: NuGet önbelleği
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # E2E testleri gerçek tarayıcı sürer; Playwright tarayıcıyı kendisi indirmez.
+      - name: Playwright tarayıcısı
+        run: |
+          dotnet build tests/Poyra.Tests.E2E/Poyra.Tests.E2E.csproj
+          pwsh tests/Poyra.Tests.E2E/bin/Debug/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Testler + kapsam (kapı ile)
+        env:
+          KAPSAM_SATIR_ESIK: '85'
+          KAPSAM_DAL_ESIK: '58'
+        run: ./scripts/test-kapsam.sh
+
+      - name: Kapsam özetini iş özetine yaz
+        if: always()
+        run: |
+          if [ -f artifacts/kapsam/SummaryGithub.md ]; then
+            cat artifacts/kapsam/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Kapsam raporunu sakla
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kapsam-raporu
+          path: artifacts/kapsam/
+          retention-days: 14
+          if-no-files-found: ignore

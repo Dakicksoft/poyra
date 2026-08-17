@@ -1,0 +1,190 @@
+# Sürüm yayınla — GitFlow'un "main'e girdi, sürüm çıkar" adımı.
+#
+# main'e her itmede koşar ama YALNIZ Directory.Build.props'taki sürümün etiketi
+# yoksa iş yapar (idempotent: aynı sürüm iki kez yayınlanmaz).
+#
+# Sırayla: sürümü oku → üç konteyner imajını GHCR'a yükle → etiket + GitHub sürümü
+#          → main'i develop'a geri birleştirecek PR'ı aç.
+#
+# NOT: etiketi bu iş akışı atar. GITHUB_TOKEN ile atılan etiket başka bir iş akışını
+# TETİKLEMEZ (GitHub'ın döngü koruması) — bu yüzden her şey tek iş akışında toplandı.
+name: Sürüm yayınla
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+
+concurrency:
+  group: surum-yayinla
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  KAYIT: ghcr.io
+
+jobs:
+  surum:
+    name: Sürüm gerekiyor mu?
+    runs-on: ubuntu-latest
+    outputs:
+      numara: ${{ steps.oku.outputs.numara }}
+      gerekli: ${{ steps.oku.outputs.gerekli }}
+      sahip: ${{ steps.oku.outputs.sahip }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - id: oku
+        run: |
+          set -e
+          NUMARA=$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' Directory.Build.props | head -1)
+          if [ -z "$NUMARA" ]; then
+            echo "HATA: Directory.Build.props içinde <Version> bulunamadı." >&2
+            exit 1
+          fi
+          echo "numara=$NUMARA" >> "$GITHUB_OUTPUT"
+          # GHCR imaj adları küçük harf olmak ZORUNDA (Dakicksoft → dakicksoft)
+          echo "sahip=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse -q --verify "refs/tags/v$NUMARA" >/dev/null; then
+            echo "gerekli=false" >> "$GITHUB_OUTPUT"
+            echo "v$NUMARA zaten yayınlanmış — atlanıyor." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "gerekli=true" >> "$GITHUB_OUTPUT"
+            echo "### Yayınlanacak sürüm: v$NUMARA" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  dogrula:
+    name: Yayın öncesi test
+    needs: surum
+    if: needs.surum.outputs.gerekli == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+      # Tam süit PR'da koştu; burada son bir emniyet kemeri (Docker'sız, hızlı).
+      - run: ./scripts/test-hizli.sh
+
+  paketler:
+    name: ${{ matrix.uygulama }} imajı
+    needs: [surum, dogrula]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - uygulama: api
+            proje: Poyra.Api
+          - uygulama: panel
+            proje: Poyra.Panel
+          - uygulama: checkout
+            proje: Poyra.Checkout
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: GHCR'a giriş
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.KAYIT }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: İmajı derle ve yükle
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/${{ matrix.proje }}/Dockerfile
+          # Sunucular çoğunlukla amd64, geliştirici makineleri arm64 (Apple Silicon).
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.surum.outputs.numara }}
+          tags: |
+            ${{ env.KAYIT }}/${{ needs.surum.outputs.sahip }}/poyra-${{ matrix.uygulama }}:${{ needs.surum.outputs.numara }}
+            ${{ env.KAYIT }}/${{ needs.surum.outputs.sahip }}/poyra-${{ matrix.uygulama }}:latest
+          labels: |
+            org.opencontainers.image.title=Poyra ${{ matrix.uygulama }}
+            org.opencontainers.image.description=Türkiye'nin açık kaynak ödeme mühendisliği platformu
+            org.opencontainers.image.version=${{ needs.surum.outputs.numara }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.uygulama }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.uygulama }}
+
+  yayin:
+    name: Etiket + GitHub sürümü
+    needs: [surum, paketler]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      # gh release create etiketi de atar — ayrı bir push adımı gerekmez.
+      - name: GitHub sürümünü oluştur
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: v${{ needs.surum.outputs.numara }}
+          SAHIP: ${{ needs.surum.outputs.sahip }}
+          NUMARA: ${{ needs.surum.outputs.numara }}
+        run: |
+          set -e
+          # Bir önceki sürüm etiketi varsa notlar oradan itibaren üretilir; ilk
+          # sürümde böyle bir etiket yoktur ve bayrak hiç verilmez (boş değer hata olurdu).
+          ONCEKI=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          BASLANGIC=""
+          [ -n "$ONCEKI" ] && BASLANGIC="--notes-start-tag $ONCEKI"
+
+          # --notes içeriği, --generate-notes ile üretilen değişiklik listesinin ÜSTÜNE eklenir.
+          gh release create "$V" \
+            --target "${{ github.sha }}" \
+            --title "Poyra $V" \
+            --generate-notes $BASLANGIC \
+            --notes "$(cat <<NOT
+          ## Konteyner imajları
+
+          Bu sürüm GHCR'da yayımlandı (linux/amd64 + linux/arm64):
+
+          \`\`\`bash
+          docker pull ghcr.io/$SAHIP/poyra-api:$NUMARA
+          docker pull ghcr.io/$SAHIP/poyra-panel:$NUMARA
+          docker pull ghcr.io/$SAHIP/poyra-checkout:$NUMARA
+          \`\`\`
+
+          Kurulum: [poyra-docs.dakicksoft.com](https://poyra-docs.dakicksoft.com/tr/kurulum/docker)
+
+          > Sertifikasyon bekleyen konnektörlerle üretim trafiği açmadan önce
+          > sağlayıcı dokümanıyla doğrulama yapın — ayrıntı README'de.
+          NOT
+          )"
+
+      - name: main'i develop'a geri birleştir
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          git fetch origin develop main
+          # Sürüm yükseltme commit'i develop'a dönmezse bir sonraki sürümde çakışır.
+          if [ -z "$(git log origin/develop..origin/main --oneline)" ]; then
+            echo "develop zaten güncel — geri birleştirme gerekmiyor." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if gh pr list --base develop --head main --state open --json number --jq '.[0].number' | grep -q '[0-9]'; then
+            echo "Açık geri birleştirme PR'ı zaten var." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh pr create --base develop --head main \
+            --title "Geri birleştirme: v${{ needs.surum.outputs.numara }} → develop" \
+            --body "Sürüm dalındaki sürüm yükseltmesi ve düzeltmeler develop'a dönüyor (GitFlow geri birleştirme adımı)."

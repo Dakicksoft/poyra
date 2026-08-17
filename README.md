@@ -6,6 +6,7 @@
 
 *Poyra "tekerlek göbeği" demektir: bütün ödeme yolları dışarıdan gelir, tek göbekte birleşir.*
 
+[![CI](https://github.com/Dakicksoft/poyra/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Dakicksoft/poyra/actions/workflows/ci.yml)
 [![Lisans: AGPL-3.0](https://img.shields.io/badge/Lisans-AGPL--3.0-blue.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-336791)](https://www.postgresql.org/)
@@ -713,13 +714,50 @@ Kapsam, süreç ve test kuralları: [SECURITY.md](SECURITY.md)
 - **Anonim onay oranı kıyas ağı** (KVKK uyumlu) · **saklı kart transfer aracı** · **yemek kartı ağları** · **Helm paketi**
 
 
+## Sürüm ve dal modeli
+
+Poyra **GitFlow** kullanır. Sürüm numarasının tek kaynağı
+[Directory.Build.props](Directory.Build.props) içindeki `<Version>`; aynı numara etikete,
+GitHub sürümüne, konteyner imajına ve API'nin `/health` yanıtına birlikte gider.
+
+| Dal | Rolü |
+|---|---|
+| `develop` | Geliştirmenin buluştuğu dal — `feature/*` buradan dallanır, buraya döner |
+| `release/x.y.z` | Sürüm hazırlığı; develop'tan açılır, sürüm numarası burada yükselir |
+| `main` | Üretimdeki kod; yalnız `release/*` ve `hotfix/*` birleşir, her birleşme bir sürümdür |
+| `hotfix/x.y.z` | Üretimdeki acil düzeltme; main'den açılır |
+
+Akış tek elle tetiklenir, gerisi otomatiktir:
+
+```
+Actions → "Sürüm hazırla" (sürüm no gir)
+   → release/x.y.z dalı açılır, sürüm yükseltilir, main'e PR açılır
+   → PR birleşince "Sürüm yayınla" devralır:
+        v.x.y.z etiketi · GitHub sürümü (değişiklik listesiyle)
+        · üç konteyner imajı GHCR'a (amd64 + arm64) · main → develop geri birleştirme PR'ı
+```
+
+**Yayımlanan imajlar** ([GitHub Packages](https://github.com/Dakicksoft/poyra/pkgs/container/poyra-api)):
+
+```bash
+docker pull ghcr.io/dakicksoft/poyra-api:latest
+docker pull ghcr.io/dakicksoft/poyra-panel:latest
+docker pull ghcr.io/dakicksoft/poyra-checkout:latest
+```
+
+**CI iki aşamalıdır** ([ci.yml](.github/workflows/ci.yml)): önce Docker'sız hızlı katman
+(birim + mimari, ~1 dk), o yeşilse gerçek Postgres ve gerçek tarayıcıyla tam süit +
+kapsam kapısı. Mutasyon testi pahalı olduğu için elle tetiklenir
+([mutasyon.yml](.github/workflows/mutasyon.yml)).
+
 ## Katkı
 
 Katkılar memnuniyetle karşılanır:
 
 1. Büyük değişiklikten önce bir **issue** açıp yaklaşımı konuşalım — modül sınırları ve
    ilkeler (yukarıda) tasarım tartışmasının çerçevesidir.
-2. branch açın, değişikliği yapın; **testsiz davranış değişikliği kabul edilmez**
+2. `develop`'tan `feature/...` dalı açın, değişikliği yapın; PR'ı **develop'a** açın
+   (`main` yalnız sürüm dallarını kabul eder). **Testsiz davranış değişikliği kabul edilmez**
    (`dotnet test` yeşil olmalı — mimari testler dahil).
 3. Commit mesajları Türkçe ve [Conventional Commits](https://www.conventionalcommits.org/) düzenindedir:
    `feat(routing): …` · `fix(panel): …` · `docs: …`
