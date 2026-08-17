@@ -659,6 +659,7 @@ Kuyruk/senkron mantığı `Poyra.Field.Core`'dadır (testli); MAUI ince kabuktur
 **Güvenlik açığı bildirimi:** lütfen kamuya açık issue **açmayın** — GitHub'ın
 [Security Advisories](https://github.com/Dakicksoft/poyra/security/advisories/new)
 özelliğiyle özel bildirim yapın. Düzeltme yayınlanana kadar ayrıntıyı paylaşmamanızı rica ederiz.
+Kapsam, süreç ve test kuralları: [SECURITY.md](SECURITY.md)
 
 ## Yol haritası
 
