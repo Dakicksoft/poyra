@@ -10,7 +10,7 @@
 [![Lisans: AGPL-3.0](https://img.shields.io/badge/Lisans-AGPL--3.0-blue.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-336791)](https://www.postgresql.org/)
-[![Testler](https://img.shields.io/badge/testler-900%20ge%C3%A7ti-brightgreen)](#testler)
+[![Testler](https://img.shields.io/badge/testler-1.111%20ge%C3%A7ti-brightgreen)](#testler)
 
 [Karşılaştırma](#alternatifler) · [Ekran görüntüleri](#ekran-görüntüleri) · [Özellikler](#özellikler) · [Konnektörler](#konnektörler) · [Mimari](#mimari) · [Akışlar](#akışlar) · [Kurulum](#hızlı-başlangıç-geliştirme-ortamı) · [Geliştirme](#geliştirme-rehberi) · [Yol haritası](#yol-haritası) · [Lisans](#lisans)
 
@@ -602,9 +602,9 @@ docker compose -f docker-compose.prod.yml up -d
 dotnet test                # hepsi, kapsam olmadan
 ```
 
-900 test, dört katman — hangi katmanın neyi kanıtladığı:
+1.111 test, dört katman — hangi katmanın neyi kanıtladığı:
 
-- **508 birim** — konnektör hash'leri, TOTP RFC 6238 vektörleri, taksit matematiği,
+- **719 birim** — konnektör hash'leri, TOTP RFC 6238 vektörleri, taksit matematiği,
   EMV QR, yeniden tahsilat politikası ve **konnektör uyum kiti** (her `IPaymentConnector`
   uygulamasının tutmak zorunda olduğu ortak sözleşme; konnektör listesi DI kaydından
   okunur, yeni banka eklendiğinde kendiliğinden kapsanır).
@@ -616,9 +616,10 @@ dotnet test                # hepsi, kapsam olmadan
   375px mobil çekmece, yazdırma stilleri. Uygulamalar test sürecinde gerçek Kestrel
   portlarında ayağa kalkar — dışarıda ayakta duran servise bağımlılık yok.
 
-Kapsam: satır **%85,6** · dal **%59,4** · metot **%93,2**. CI iki aşamalıdır — önce
+Kapsam: satır **%80,7** · dal **%54,3** · metot **%90**. CI iki aşamalıdır — önce
 Docker'sız hızlı katman (~1 dk), o yeşilse tam süit + kapsam kapısı. Kapı bir hedef değil
-**gerileme** kapısıdır: testsiz kod eklenince oran düşer ve PR kırılır.
+**gerileme** kapısıdır: eşikler ölçülen değerin hemen altına kurulur, testsiz kod eklenince
+oran düşer ve PR kırılır. Oran yükseldikçe eşik de yükseltilmelidir.
 
 ```bash
 ./scripts/mutasyon.sh Poyra.Modules.Installments   # mutasyon testi (Stryker.NET)
