@@ -11,7 +11,7 @@
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-336791)](https://www.postgresql.org/)
 [![Testler](https://img.shields.io/badge/testler-900%20ge%C3%A7ti-brightgreen)](#testler)
 
-[Karşılaştırma](#türkiyedeki-alternatifler) · [Ekran görüntüleri](#ekran-görüntüleri) · [Özellikler](#özellikler) · [Konnektörler](#konnektörler) · [Mimari](#mimari) · [Akışlar](#akışlar) · [Kurulum](#hızlı-başlangıç-geliştirme-ortamı) · [Geliştirme](#geliştirme-rehberi) · [Yol haritası](#yol-haritası) · [Lisans](#lisans)
+[Karşılaştırma](#alternatifler) · [Ekran görüntüleri](#ekran-görüntüleri) · [Özellikler](#özellikler) · [Konnektörler](#konnektörler) · [Mimari](#mimari) · [Akışlar](#akışlar) · [Kurulum](#hızlı-başlangıç-geliştirme-ortamı) · [Geliştirme](#geliştirme-rehberi) · [Yol haritası](#yol-haritası) · [Lisans](#lisans)
 
 </div>
 
@@ -42,7 +42,7 @@ bankadan para geri gelene kadar takip eder.
 |---|---|---|
 | Yönlendirme | "En ucuza yönlendirir" (kara kutu) | **Açıklanabilir:** kural DSL'i + görsel kurucu + geçmiş işlemlerde **simülatör** ("bu kural geçen ay X ₺ tasarruf ederdi") + her işlemde "**neden bu POS?**" gerekçesi |
 | İşlem sonrası | Raporlama | **Beklenen para defteri** (bankadan alacak takibi), üç yönlü mutabakat, **komisyon denetimi** (TCMB rejimi + anlaşma ↔ ekstre), valör kaybının parasal ölçümü, itirazın kapanışa kadar izlenmesi |
-| Türkiye gerçekleri | Genel geçer | Taksit + vade farkı motoru (bankacı yuvarlaması), TR Karekod (EMVCo), **maaş takvimli akıllı dunning** (ayın 1'i/15'i), KVKK silme ↔ VUK saklama dengesi, Türkçe 'İ' katlama, TR günü (UTC+3) raporlama, Logo/Mikro ERP fişi |
+| Türkiye gerçekleri | Genel geçer | Taksit + vade farkı motoru (bankacı yuvarlaması), TR Karekod (EMVCo), **maaş takvimli akıllı yeniden tahsilat** (dunning; ayın 1'i/15'i), KVKK silme ↔ VUK saklama dengesi, Türkçe 'İ' katlama, TR günü (UTC+3) raporlama, Logo/Mikro ERP fişi |
 | Saha tahsilatı | Yok | **Çevrimdışı-öncelikli MAUI uygulaması:** ağsız sahada kuyruklama, yasal zaman damgası **sunucudan** |
 | Denetlenebilirlik | Log | **Silinemez operasyon kütüğü:** olay defterlerinde `UPDATE/DELETE` hakkı veritabanı düzeyinde yoktur — kayıt iptal edilir, silinmez |
 | Dağıtım | Yalnız SaaS | **Self-host:** üç Dockerfile + üretim kompozisyonu; verisini dışarı veremeyen kurumlar kendi bünyesinde çalıştırır |
@@ -59,7 +59,7 @@ bankadan para geri gelene kadar takip eder.
 | Komisyon denetimi + itiraz takibi | ✅ kuruş toleranssız, "Bankaya İtiraz Raporu" | — | — | — | — | — | — | — | ❌ |
 | Valör kaybını liraya çevirme | ✅ | — | — | — | — | — | — | — | ❌ |
 | Taksit + vade farkı motoru | ✅ bankacı yuvarlaması | ✅ | ✅ | ✅ | ✅ 1–12 taksit | ✅ | ✅ | ✅ | kısmen — taksit parametresi |
-| Abonelik + dunning | ✅ maaş takvimli akıllı dunning | ✅ | — | ✅ tekrarlı ödeme + kart saklama | — | ✅ tokenizasyon + tekrarlayan ödeme | ✅ (iyzico) | kısmen — borç bildirimi (e-posta/SMS) | kısmen — recurring |
+| Abonelik + yeniden tahsilat | ✅ maaş takvimli akıllı yeniden tahsilat | ✅ | — | ✅ tekrarlı ödeme + kart saklama | — | ✅ tokenizasyon + tekrarlayan ödeme | ✅ (iyzico) | kısmen — borç bildirimi (e-posta/SMS) | kısmen — recurring |
 | Saha tahsilatı (çevrimdışı mobil) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | kısmen — SMS/link ile çevrimiçi | ❌ |
 | Ücretlendirme | Self-host ücretsiz | SaaS | SaaS | SaaS | SaaS — %2,99'dan başlayan komisyon | SaaS | işlem komisyonu | SaaS | ücretsiz |
 
@@ -167,7 +167,7 @@ sayfasında alınır.
 - Logo/Mikro çift taraflı muhasebe fişi (Tekdüzen Plan, dengesiz fiş üretilmez), TR biçimli CSV dışa aktarım
 
 **Abonelik ve müşteri**
-- Planlar, deneme süresi, dönem ilerletme, kart güncelleme; TR'ye özgü **akıllı dunning** (limit yetersiz → maaş penceresi; süresi dolmuş kart → kör deneme yok)
+- Planlar, deneme süresi, dönem ilerletme, kart güncelleme; TR'ye özgü **akıllı yeniden tahsilat** (limit yetersiz → maaş penceresi; süresi dolmuş kart → kör deneme yok)
 - Müşteri tek görünümü, ödeme talimatı (mandate), KVKK silme (mali kayıt saklama yükümlülüğüyle uyumlu)
 
 **Risk ve uyum**
@@ -503,7 +503,7 @@ curl -X POST http://localhost:5080/v1/vault/cards \
   -d '{"cardNumber":"4111111111111111","expiryMonth":12,"expiryYear":2031,"customerRef":"musteri-1"}'
 # → tok_… (PAN yanıtta YOK, CVV hiç saklanmaz)
 
-# Abonelik: plan → kayıtlı kartla tekrarlayan tahsilat → dunning izleme
+# Abonelik: plan → kayıtlı kartla tekrarlayan tahsilat → yeniden tahsilat izleme
 curl -X POST http://localhost:5080/v1/plans \
   -H "Content-Type: application/json" -H "X-Api-Key: sk_test_..." \
   -d '{"name":"Aylık Paket","amountMinor":15000,"interval":"month","trialDays":14}'
@@ -563,7 +563,7 @@ dotnet test                # hepsi, kapsam olmadan
 900 test, dört katman — hangi katmanın neyi kanıtladığı:
 
 - **508 birim** — konnektör hash'leri, TOTP RFC 6238 vektörleri, taksit matematiği,
-  EMV QR, dunning politikası ve **konnektör uyum kiti** (her `IPaymentConnector`
+  EMV QR, yeniden tahsilat politikası ve **konnektör uyum kiti** (her `IPaymentConnector`
   uygulamasının tutmak zorunda olduğu ortak sözleşme; konnektör listesi DI kaydından
   okunur, yeni banka eklendiğinde kendiliğinden kapsanır).
 - **37 mimari/PCI bekçisi** — modül sınırı, CVV sütunu yokluğu, düz PAN taraması.
