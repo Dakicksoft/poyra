@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Poyra.AppHost/Poyra.AppHost.csproj" />
     <Project Path="src/Poyra.Api/Poyra.Api.csproj" />
     <Project Path="src/Poyra.Checkout/Poyra.Checkout.csproj" />
     <Project Path="src/Poyra.Panel/Poyra.Panel.csproj" />
