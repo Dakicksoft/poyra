@@ -1,0 +1,47 @@
+# Mutasyon testi (Stryker.NET) — PAHALIDIR, bu yüzden her PR'da değil ELLE koşar.
+#
+# Kapsam "kod çalıştı mı" der; mutasyon skoru "davranış gerçekten doğrulandı mı" der:
+# koda kasıtlı küçük hatalar enjekte edilir ve testlerin bunları yakalayıp
+# yakalamadığına bakılır.
+name: Mutasyon testi
+
+on:
+  workflow_dispatch:
+    inputs:
+      proje:
+        description: 'Tek proje (örn. Poyra.Modules.Installments) — boş bırakılırsa betikteki seçili projeler'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mutasyon:
+    name: Stryker.NET
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+
+      - name: NuGet önbelleği
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Mutasyon koşusu
+        run: ./scripts/mutasyon.sh ${{ inputs.proje }}
+
+      - name: Raporu sakla
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutasyon-raporu
+          path: artifacts/mutasyon/
+          retention-days: 30
+          if-no-files-found: ignore

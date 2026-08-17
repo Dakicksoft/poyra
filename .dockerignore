@@ -1,0 +1,26 @@
+# Derleme çıktıları imaja girmez: hem bağlam boyutunu şişirir hem de host'ta
+# üretilmiş obj/ dosyaları konteyner içindeki restore'u bozabilir.
+**/bin/
+**/obj/
+artifacts/
+
+# Depo ve araç dosyaları
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+
+# Sırlar ASLA imaja girmez
+.env
+.env.*
+!.env.example
+
+# Geliştirme/test varlıkları — üretim imajında işi yok
+tests/
+docs/
+scripts/
+src/Poyra.AppHost/
+src/Poyra.Field.App/
+*.md
+docker-compose*.yml

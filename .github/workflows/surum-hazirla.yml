@@ -1,0 +1,89 @@
+# Sürüm hazırla — GitFlow'un "release/hotfix dalı aç" adımı.
+#
+# Elle tetiklenir (Actions → Sürüm hazırla → Run workflow):
+#   release : develop'tan `release/x.y.z` açar   (normal sürüm)
+#   hotfix  : main'den   `hotfix/x.y.z`  açar   (üretimdeki acil düzeltme)
+#
+# Yaptığı iş: dalı açar, Directory.Build.props'taki sürümü yükseltir, main'e PR açar.
+# PR birleşince "Sürüm yayınla" iş akışı devralır (etiket + GitHub sürümü + imajlar).
+name: Sürüm hazırla
+
+on:
+  workflow_dispatch:
+    inputs:
+      surum:
+        description: 'Sürüm numarası — SemVer, başında v OLMADAN (örn. 0.2.0)'
+        required: true
+        type: string
+      tur:
+        description: 'Dal türü'
+        required: true
+        type: choice
+        options: [release, hotfix]
+        default: release
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  hazirla:
+    name: ${{ inputs.tur }}/${{ inputs.surum }} dalını aç
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sürüm numarasını doğrula
+        run: |
+          if ! printf '%s' "${{ inputs.surum }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "HATA: '${{ inputs.surum }}' SemVer değil. Beklenen biçim: 0.2.0 (başında v yok)." >&2
+            exit 1
+          fi
+
+      # release develop'tan, hotfix main'den dallanır — GitFlow kuralı.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tur == 'hotfix' && 'main' || 'develop' }}
+          fetch-depth: 0
+
+      - name: Etiket zaten var mı?
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v${{ inputs.surum }}" >/dev/null 2>&1; then
+            echo "HATA: v${{ inputs.surum }} etiketi zaten var — yayınlanmış sürüm yeniden hazırlanamaz." >&2
+            exit 1
+          fi
+
+      - name: Dalı aç ve sürümü yükselt
+        run: |
+          set -e
+          DAL="${{ inputs.tur }}/${{ inputs.surum }}"
+          git switch -c "$DAL"
+
+          # Tek sürüm kaynağı: Directory.Build.props
+          sed -i "s|<Version>[^<]*</Version>|<Version>${{ inputs.surum }}</Version>|" Directory.Build.props
+          grep -q "<Version>${{ inputs.surum }}</Version>" Directory.Build.props
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(surum): ${{ inputs.surum }} sürümüne hazırlık"
+          git push -u origin "$DAL"
+
+      - name: main'e PR aç
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --base main \
+            --head "${{ inputs.tur }}/${{ inputs.surum }}" \
+            --title "Sürüm ${{ inputs.surum }}" \
+            --body "$(cat <<'PR'
+          GitFlow ${{ inputs.tur }} dalı. Bu PR **main**'e birleşince `Sürüm yayınla`
+          iş akışı otomatik devreye girer: `v${{ inputs.surum }}` etiketi atılır,
+          GitHub sürümü oluşturulur, üç konteyner imajı GHCR'a yüklenir ve
+          `main → develop` geri birleştirme PR'ı açılır.
+
+          ### Birleştirmeden önce
+          - [ ] CI yeşil (hızlı katman + tam süit + kapsam kapısı)
+          - [ ] Sürüm notlarına girecek değişiklikler gözden geçirildi
+          - [ ] Veritabanı migration'ları geriye dönük uyumlu
+          - [ ] Sertifikasyon bekleyen konnektörlerde üretime açılan yeni bir şey yok
+          PR
+          )"

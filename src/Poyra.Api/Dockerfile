@@ -1,10 +1,15 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
+# Sürüm numarası dışarıdan gelir (CI: release etiketi). Verilmezse
+# Directory.Build.props'taki geliştirme değeri kullanılır.
+ARG VERSION=
+
 COPY Directory.Build.props Directory.Packages.props ./
 COPY src/ src/
 RUN dotnet restore src/Poyra.Api/Poyra.Api.csproj
-RUN dotnet publish src/Poyra.Api/Poyra.Api.csproj -c Release -o /app --no-restore
+RUN dotnet publish src/Poyra.Api/Poyra.Api.csproj -c Release -o /app --no-restore \
+    $([ -n "$VERSION" ] && echo "-p:Version=$VERSION")
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

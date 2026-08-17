@@ -1,6 +1,10 @@
 using System.Globalization;
 using Hangfire;
 using Hangfire.PostgreSql;
+using Npgsql;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Poyra.Checkout;
 using Poyra.Checkout.Components;
 using Poyra.Modules.Connectors;
@@ -84,6 +88,24 @@ builder.Services.AddWebEncoders(options =>
         System.Text.Unicode.UnicodeRanges.All));
 
 builder.Services.AddRazorComponents();
+
+
+var otlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("poyra-checkout"))
+    .WithTracing(t =>
+    {
+        t.AddAspNetCoreInstrumentation()
+         .AddHttpClientInstrumentation()
+         .AddNpgsql();
+        if (otlpEndpoint is not null) t.AddOtlpExporter();
+    })
+    .WithMetrics(m =>
+    {
+        m.AddAspNetCoreInstrumentation()
+         .AddHttpClientInstrumentation();
+        if (otlpEndpoint is not null) m.AddOtlpExporter();
+    });
 
 var app = builder.Build();
 

@@ -1,13 +1,16 @@
-# Çok aşamalı: derleme SDK ile, çalışma zamanı yalnız runtime imajıyla.
-# Kaynak ve SDK üretim imajında BULUNMAZ — saldırı yüzeyi ve boyut ikisi de küçülür.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
+
+# Sürüm numarası dışarıdan gelir (CI: release etiketi). Verilmezse
+# Directory.Build.props'taki geliştirme değeri kullanılır.
+ARG VERSION=
 
 # Önce yalnız proje dosyaları: bağımlılık katmanı kaynak değişince yeniden çözülmesin
 COPY Directory.Build.props Directory.Packages.props ./
 COPY src/ src/
 RUN dotnet restore src/Poyra.Panel/Poyra.Panel.csproj
-RUN dotnet publish src/Poyra.Panel/Poyra.Panel.csproj -c Release -o /app --no-restore
+RUN dotnet publish src/Poyra.Panel/Poyra.Panel.csproj -c Release -o /app --no-restore \
+    $([ -n "$VERSION" ] && echo "-p:Version=$VERSION")
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

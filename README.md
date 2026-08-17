@@ -6,6 +6,7 @@
 
 *Poyra "tekerlek göbeği" demektir: bütün ödeme yolları dışarıdan gelir, tek göbekte birleşir.*
 
+[![CI](https://github.com/Dakicksoft/poyra/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Dakicksoft/poyra/actions/workflows/ci.yml)
 [![Lisans: AGPL-3.0](https://img.shields.io/badge/Lisans-AGPL--3.0-blue.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-336791)](https://www.postgresql.org/)
@@ -180,7 +181,9 @@ sayfasında alınır.
 - Panel: Blazor (koyu tema, mobil çekmece gezinme), canlı pano (LISTEN/NOTIFY), **TOTP 2FA** (QR kurulum, kurtarma kodları, cihaz hatırlama, owner/admin zorunluluk politikası)
 - Webhook'lar: transactional outbox → HMAC imzalı teslim → üstel yeniden deneme → replay
 - Saha Uygulaması: MAUI/Android + SQLite kuyruk; sunucu zaman otoritesi
-- Scalar API dokümantasyonu, OpenTelemetry, Hangfire
+- Scalar API dokümantasyonu, Hangfire; **üç host'ta da OpenTelemetry** (iz + ölçüm) —
+  dışa aktarıcı yalnız `OTEL_EXPORTER_OTLP_ENDPOINT` tanımlıysa devreye girer, yani
+  koleksiyoncu kurmayan kurulum hiçbir şey kaybetmez
 
 ## Konnektörler
 
@@ -306,10 +309,13 @@ poyra/
 │  ├─ Poyra.Panel               İşyeri paneli (Blazor, statik SSR + interaktif adalar)
 │  ├─ Poyra.Checkout            Müşteriye bakan kimliksiz ödeme sayfası (açık tema)
 │  ├─ Poyra.Field.Core          Saha kuyruk/senkron mantığı (sade, testli kütüphane)
-│  └─ Poyra.Field.App           MAUI/Android saha uygulaması (ince kabuk)
+│  ├─ Poyra.Field.App           MAUI/Android saha uygulaması (ince kabuk)
+│  └─ Poyra.AppHost             .NET Aspire — geliştirmede her şeyi tek komutla ayağa
+│                               kaldıran orkestrasyon (üretimde kullanılmaz)
 ├─ tests/                       Unit · Architecture (modül sınırı + PCI bekçileri) · Integration
 ├─ docker/ + docker-compose*.yml
-└─ docs/                        Ürün, mimari, kurulum, entegrasyon dokümanları
+└─ docs/gorseller/              README ekran görüntüleri (ürün dokümanları ayrı sitede:
+                                poyra-docs.dakicksoft.com)
 ```
 
 ### Bileşenler
@@ -354,7 +360,9 @@ flowchart LR
 - **Checkout neden ayrı host?** Kimliksiz, herkese açık ve saldırı yüzeyi en geniş bileşen;
   panelden ve API'den ayrı ölçeklenir/kapatılır. İşyeri slug'dan çözülür, sonrası normal RLS'li akış.
 - **Kart verisi nerede?** Hosted akışta hiç uğramaz (banka sayfası). Direct/token akışı için Kasa
-  modülü: PAN AES-256-GCM zarfta, **CVV asla saklanmaz** — kanıtları [docs/04](docs/04-pci-kanit-paketi.md).
+  modülü: PAN AES-256-GCM zarfta, **CVV asla saklanmaz** — ayrıntı:
+  [mimari dokümanı](https://poyra-docs.dakicksoft.com/tr/baslangic/mimari), bekçi testleri:
+  [sürüm kalitesi](https://poyra-docs.dakicksoft.com/tr/kurulum/surum-kalitesi).
 
 ## Akışlar
 
@@ -420,10 +428,43 @@ sequenceDiagram
 
 ## Hızlı başlangıç (geliştirme ortamı)
 
-**Gereksinimler:** [.NET 10 SDK](https://dotnet.microsoft.com/download) · Docker (Compose ile)
+**Gereksinimler:** [.NET 10 SDK](https://dotnet.microsoft.com/download) · Docker
+
+**Tek komut** — .NET Aspire veritabanını, üç host'u ve aralarındaki bağlantıları birlikte ayağa kaldırır:
 
 ```bash
 git clone https://github.com/Dakicksoft/poyra.git && cd poyra
+dotnet run --project src/Poyra.AppHost
+```
+
+Açılan Aspire panosunda beş kaynak da **Running** olur; günlükler, izler ve sağlık
+durumu tek ekrandadır:
+
+| Kaynak | Adres |
+|---|---|
+| **Aspire panosu** | http://localhost:15080 (konsolda tek kullanımlık giriş bağlantısı yazar) |
+| API | http://localhost:5080 — Scalar dokümantasyonu: [/docs](http://localhost:5080/docs) · sağlık: `/health/live`, `/health/ready` |
+| Panel | http://localhost:5090 |
+| Checkout | http://localhost:5095/l/{slug} |
+| Postgres 18 | localhost:5442 (`poyra` sahip rolü + `poyra_app` uygulama rolü) |
+
+AppHost'un sizin yerinize kurduğu sıra: Postgres ayağa kalkar → `docker/initdb`
+betikleri **poyra_app** rolünü açar → API şemayı uygular (`Database:AutoMigrate`) →
+Panel ve Checkout ancak API sağlıklı olunca başlar. Bağlantı dizeleri ve üç host'un
+birbirine verdiği adresler koddan üretilir; elle yazılan localhost portu kalmaz —
+[src/Poyra.AppHost/Program.cs](src/Poyra.AppHost/Program.cs).
+
+Üç uygulamanın da izleri ve ölçümleri panoya akar: bir ödeme isteğinin hangi adımda
+takıldığını, hangi SQL'in yavaş olduğunu ayrı bir araç kurmadan görürsünüz. Telemetri
+uygulamaların kendi OpenTelemetry kurulumundan gelir — Aspire'a bağımlı değildir,
+üretimde de kendi koleksiyoncunuza aynı şekilde akar.
+
+<details>
+<summary><b>Aspire'sız kurulum</b> — docker compose + üç terminal (eski yol, hâlâ çalışır)</summary>
+
+<br />
+
+```bash
 docker compose up -d                      # Postgres 18 (localhost:5442) + poyra_app rolü
 dotnet run --project src/Poyra.Api        # Development: migration'ları açılışta kendisi uygular
 ```
@@ -438,11 +479,10 @@ dotnet run --project src/Poyra.Panel      # işyeri paneli
 dotnet run --project src/Poyra.Checkout   # müşteriye bakan ödeme sayfası
 ```
 
-| Servis | Adres |
-|---|---|
-| API | http://localhost:5080 — Scalar dokümantasyonu: [/docs](http://localhost:5080/docs) · sağlık: `/health/live`, `/health/ready` |
-| Panel | http://localhost:5090 |
-| Checkout | http://localhost:5095/l/{slug} |
+İkisi **aynı anda** çalıştırılmaz: hem compose hem Aspire 5442 portunu ister. Aspire
+kendi veri hacmini (`poyra-aspire-pgdata`) kullanır — compose'daki veriniz ayrı durur.
+
+</details>
 
 ### İlk işyeri ve ilk ödeme
 
@@ -461,7 +501,9 @@ curl -X POST http://localhost:5080/v1/connector-accounts \
 # 3) Ödeme aç + onayla → rota kararı + bankaya gidecek 3DS formu döner
 curl -X POST http://localhost:5080/v1/payments \
   -H "Content-Type: application/json" -H "X-Api-Key: sk_test_..." \
-  -d '{"amountMinor":149900,"currency":"TRY","installments":3,"confirm":true}'
+  -d '{"amountMinor":149900,"currency":"TRY","confirm":true}'
+# Taksitli denemek için önce taksit şeması tanımlayın (POST /v1/installments/schemes);
+# şemasız taksit isteği `installments.not_offered` ile reddedilir — uydurma vade farkı üretilmez.
 ```
 
 Panele `sahip@ornek.com` ile girin. **Güvenlik** sayfasından TOTP 2FA'yı
@@ -534,7 +576,7 @@ Rota kuralı örneği (DSL şeması: [RuleDocument.cs](src/Modules/Poyra.Modules
 ## Üretim kurulumu (self-host)
 
 Poyra tek Postgres ve üç web süreciyle çalışır; kurulum yarım saatlik iştir.
-Adım adım rehber: **[docs/05-kurulum.md](docs/05-kurulum.md)**. Özet:
+Adım adım rehber: **[poyra-docs.dakicksoft.com → Kurulum](https://poyra-docs.dakicksoft.com/tr/kurulum/docker)**. Özet:
 
 ```bash
 cp .env.example .env
@@ -672,19 +714,57 @@ Kapsam, süreç ve test kuralları: [SECURITY.md](SECURITY.md)
 - **Anonim onay oranı kıyas ağı** (KVKK uyumlu) · **saklı kart transfer aracı** · **yemek kartı ağları** · **Helm paketi**
 
 
+## Sürüm ve dal modeli
+
+Poyra **GitFlow** kullanır. Sürüm numarasının tek kaynağı
+[Directory.Build.props](Directory.Build.props) içindeki `<Version>`; aynı numara etikete,
+GitHub sürümüne, konteyner imajına ve API'nin `/health` yanıtına birlikte gider.
+
+| Dal | Rolü |
+|---|---|
+| `develop` | Geliştirmenin buluştuğu dal — `feature/*` buradan dallanır, buraya döner |
+| `release/x.y.z` | Sürüm hazırlığı; develop'tan açılır, sürüm numarası burada yükselir |
+| `main` | Üretimdeki kod; yalnız `release/*` ve `hotfix/*` birleşir, her birleşme bir sürümdür |
+| `hotfix/x.y.z` | Üretimdeki acil düzeltme; main'den açılır |
+
+Akış tek elle tetiklenir, gerisi otomatiktir:
+
+```
+Actions → "Sürüm hazırla" (sürüm no gir)
+   → release/x.y.z dalı açılır, sürüm yükseltilir, main'e PR açılır
+   → PR birleşince "Sürüm yayınla" devralır:
+        v.x.y.z etiketi · GitHub sürümü (değişiklik listesiyle)
+        · üç konteyner imajı GHCR'a (amd64 + arm64) · main → develop geri birleştirme PR'ı
+```
+
+**Yayımlanan imajlar** ([GitHub Packages](https://github.com/Dakicksoft/poyra/pkgs/container/poyra-api)):
+
+```bash
+docker pull ghcr.io/dakicksoft/poyra-api:latest
+docker pull ghcr.io/dakicksoft/poyra-panel:latest
+docker pull ghcr.io/dakicksoft/poyra-checkout:latest
+```
+
+**CI iki aşamalıdır** ([ci.yml](.github/workflows/ci.yml)): önce Docker'sız hızlı katman
+(birim + mimari, ~1 dk), o yeşilse gerçek Postgres ve gerçek tarayıcıyla tam süit +
+kapsam kapısı. Mutasyon testi pahalı olduğu için elle tetiklenir
+([mutasyon.yml](.github/workflows/mutasyon.yml)).
+
 ## Katkı
 
 Katkılar memnuniyetle karşılanır:
 
 1. Büyük değişiklikten önce bir **issue** açıp yaklaşımı konuşalım — modül sınırları ve
    ilkeler (yukarıda) tasarım tartışmasının çerçevesidir.
-2. branch açın, değişikliği yapın; **testsiz davranış değişikliği kabul edilmez**
+2. `develop`'tan `feature/...` dalı açın, değişikliği yapın; PR'ı **develop'a** açın
+   (`main` yalnız sürüm dallarını kabul eder). **Testsiz davranış değişikliği kabul edilmez**
    (`dotnet test` yeşil olmalı — mimari testler dahil).
 3. Commit mesajları Türkçe ve [Conventional Commits](https://www.conventionalcommits.org/) düzenindedir:
    `feat(routing): …` · `fix(panel): …` · `docs: …`
 4. PR açıklamasında "neden"i anlatın; arayüz değişikliğinde ekran görüntüsü ekleyin.
 
-Dokümantasyon haritası: [docs/README.md](docs/README.md)
+Dokümantasyon: **[poyra-docs.dakicksoft.com](https://poyra-docs.dakicksoft.com/)** ·
+kısa yol rehberleri: [proje wiki'si](https://github.com/Dakicksoft/poyra/wiki)
 
 ## Lisans
 
