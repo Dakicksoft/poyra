@@ -180,7 +180,9 @@ sayfasında alınır.
 - Panel: Blazor (koyu tema, mobil çekmece gezinme), canlı pano (LISTEN/NOTIFY), **TOTP 2FA** (QR kurulum, kurtarma kodları, cihaz hatırlama, owner/admin zorunluluk politikası)
 - Webhook'lar: transactional outbox → HMAC imzalı teslim → üstel yeniden deneme → replay
 - Saha Uygulaması: MAUI/Android + SQLite kuyruk; sunucu zaman otoritesi
-- Scalar API dokümantasyonu, OpenTelemetry, Hangfire
+- Scalar API dokümantasyonu, Hangfire; **üç host'ta da OpenTelemetry** (iz + ölçüm) —
+  dışa aktarıcı yalnız `OTEL_EXPORTER_OTLP_ENDPOINT` tanımlıysa devreye girer, yani
+  koleksiyoncu kurmayan kurulum hiçbir şey kaybetmez
 
 ## Konnektörler
 
@@ -450,6 +452,11 @@ betikleri **poyra_app** rolünü açar → API şemayı uygular (`Database:AutoM
 Panel ve Checkout ancak API sağlıklı olunca başlar. Bağlantı dizeleri ve üç host'un
 birbirine verdiği adresler koddan üretilir; elle yazılan localhost portu kalmaz —
 [src/Poyra.AppHost/Program.cs](src/Poyra.AppHost/Program.cs).
+
+Üç uygulamanın da izleri ve ölçümleri panoya akar: bir ödeme isteğinin hangi adımda
+takıldığını, hangi SQL'in yavaş olduğunu ayrı bir araç kurmadan görürsünüz. Telemetri
+uygulamaların kendi OpenTelemetry kurulumundan gelir — Aspire'a bağımlı değildir,
+üretimde de kendi koleksiyoncunuza aynı şekilde akar.
 
 <details>
 <summary><b>Aspire'sız kurulum</b> — docker compose + üç terminal (eski yol, hâlâ çalışır)</summary>
