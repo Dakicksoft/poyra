@@ -27,12 +27,12 @@
             <p class="login-links"><a href="/giris">Girişe dön</a></p>
         </div>
     }
-    else if (Belirteç is { Length: > 0 })
+    else if (Belirtec is { Length: > 0 })
     {
 
         <form method="post" action="/eposta-dogrula" class="card center">
             <AntiforgeryToken />
-            <input type="hidden" name="belirteç" value="@Belirteç" />
+            <input type="hidden" name="belirtec" value="@Belirtec" />
             <p>E-posta adresinizi doğrulamak için tıklayın.</p>
             <button type="submit" class="primary">E-postamı doğrula</button>
         </form>
@@ -49,8 +49,8 @@
 </div>
 
 @code {
-    [SupplyParameterFromQuery(Name = "belirteç")]
-    private string? Belirteç { get; set; }
+    [SupplyParameterFromQuery(Name = "belirtec")]
+    private string? Belirtec { get; set; }
 
     [SupplyParameterFromQuery(Name = "sonuc")]
     private string? Sonuc { get; set; }
@@ -60,7 +60,7 @@
 
     private static string HataText(string? kod) => kod switch
     {
-        "belirteç-gecersiz" => "Doğrulama bağlantısı geçersiz ya da süresi dolmuş. Panelden yenisini isteyin.",
+        "belirtec-gecersiz" => "Doğrulama bağlantısı geçersiz ya da süresi dolmuş. Panelden yenisini isteyin.",
         _ => "Doğrulama tamamlanamadı. Panelden yeni bağlantı isteyin.",
     };
 }

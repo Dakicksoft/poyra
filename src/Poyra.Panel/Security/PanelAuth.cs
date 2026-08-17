@@ -199,7 +199,7 @@ public static class PanelAuthEndpoints
     }
 
     private static IResult ResetError(string token, string code)
-        => Results.Redirect($"/parola-sifirla?belirteç={Uri.EscapeDataString(token)}&hata={code}");
+        => Results.Redirect($"/parola-sifirla?belirtec={Uri.EscapeDataString(token)}&hata={code}");
 
     private static string AuthErrorCode(Exception ex) => ex switch
     {
@@ -209,8 +209,8 @@ public static class PanelAuthEndpoints
             "auth.no_membership" => "uyelik-yok",
             "auth.tenant_mismatch" => "isyeri-uyusmuyor",
             "auth.tenant_required" => "isyeri-kodu-gerekli",
-            "auth.reset_token_invalid" => "belirteç-gecersiz",
-            "auth.verify_token_invalid" => "belirteç-gecersiz",
+            "auth.reset_token_invalid" => "belirtec-gecersiz",
+            "auth.verify_token_invalid" => "belirtec-gecersiz",
             _ => "islem-basarisiz",
         },
         _ => "islem-basarisiz",
