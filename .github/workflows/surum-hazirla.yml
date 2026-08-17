@@ -80,8 +80,14 @@ jobs:
           GitHub sürümü oluşturulur, üç konteyner imajı GHCR'a yüklenir ve
           `main → develop` geri birleştirme PR'ı açılır.
 
+          > **Bu PR'da CI kontrolü görünmez** — GitHub, `github-actions[bot]` tarafından
+          > açılan PR'larda iş akışlarını tetiklemez (döngü koruması). Eksik değil,
+          > kasıtlı: aynı kod develop'ta tam CI'dan geçti, `Sürüm yayınla` yayından önce
+          > testleri bir kez daha koşar ve birleşme sonrası main'de CI yine koşar.
+          > Yine de bu dalda CI görmek isterseniz: Actions → CI → Run workflow → bu dal.
+
           ### Birleştirmeden önce
-          - [ ] CI yeşil (hızlı katman + tam süit + kapsam kapısı)
+          - [ ] develop'ta CI yeşildi (hızlı katman + tam süit + kapsam kapısı)
           - [ ] Sürüm notlarına girecek değişiklikler gözden geçirildi
           - [ ] Veritabanı migration'ları geriye dönük uyumlu
           - [ ] Sertifikasyon bekleyen konnektörlerde üretime açılan yeni bir şey yok
