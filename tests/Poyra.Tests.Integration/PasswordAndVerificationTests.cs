@@ -134,7 +134,7 @@ public sealed class PasswordAndVerificationTests : IDisposable
         throw new InvalidOperationException($"{purpose} postası 20 turda gönderilemedi.");
     }
 
-    private static string TokenFromBody(EmailMessageRecord record, string queryKey = "belirteç")
+    private static string TokenFromBody(EmailMessageRecord record, string queryKey = "belirtec")
     {
         var match = Regex.Match(record.BodyText, queryKey + @"=([A-Za-z0-9_\-%]+)");
         match.Success.ShouldBeTrue($"posta gövdesinde {queryKey} yok:\n{record.BodyText}");
@@ -152,7 +152,7 @@ public sealed class PasswordAndVerificationTests : IDisposable
         var mail = inbox.ShouldHaveSingleItem();
         mail.Subject.ShouldBe("Poyra e-posta doğrulama");
         mail.Status.ShouldBe(EmailStatus.Pending); // teslimat ayrı iştir
-        mail.BodyText.ShouldContain("/eposta-dogrula?belirteç=");
+        mail.BodyText.ShouldContain("/eposta-dogrula?belirtec=");
         mail.BodyText.ShouldContain("3 gün geçerlidir");
     }
 
@@ -314,21 +314,21 @@ public sealed class PasswordAndVerificationTests : IDisposable
         var token = TokenFromBody((await InboxAsync(email, "password_reset")).Single());
 
         // Belirteç sayfada gizli alanda taşınır (adres satırında kalmasın)
-        var form = await panel.GetStringAsync($"/parola-sifirla?belirteç={Uri.EscapeDataString(token)}");
+        var form = await panel.GetStringAsync($"/parola-sifirla?belirtec={Uri.EscapeDataString(token)}");
         form.ShouldContain("Yeni parola");
         form.ShouldContain(token);
 
         var mismatch = await panel.PostAsync("/parola-sifirla",
             new FormUrlEncodedContent(new Dictionary<string, string>
             {
-                ["belirteç"] = token, ["password"] = NewPassword, ["passwordRepeat"] = "farkli-parola-123",
+                ["belirtec"] = token, ["password"] = NewPassword, ["passwordRepeat"] = "farkli-parola-123",
             }));
         mismatch.Headers.Location!.ToString().ShouldContain("hata=");
 
         var done = await panel.PostAsync("/parola-sifirla",
             new FormUrlEncodedContent(new Dictionary<string, string>
             {
-                ["belirteç"] = token, ["password"] = NewPassword, ["passwordRepeat"] = NewPassword,
+                ["belirtec"] = token, ["password"] = NewPassword, ["passwordRepeat"] = NewPassword,
             }));
         done.Headers.Location!.ToString().ShouldContain("/giris?sonuc=");
 
@@ -357,11 +357,11 @@ public sealed class PasswordAndVerificationTests : IDisposable
         // Doğrulama bağlantısı GET'te belirteci TÜKETMEZ (SafeLinks ön-açması yakmasın) —
         // sayfa onay butonu gösterir, doğrulama POST ile yapılır
         var token = TokenFromBody((await InboxAsync(email, "email_verification")).Single());
-        var page = await panel.GetStringAsync($"/eposta-dogrula?belirteç={Uri.EscapeDataString(token)}");
+        var page = await panel.GetStringAsync($"/eposta-dogrula?belirtec={Uri.EscapeDataString(token)}");
         page.ShouldContain("doğrula");
 
         var confirmed = await panel.PostAsync("/eposta-dogrula", new FormUrlEncodedContent(
-            new Dictionary<string, string> { ["belirteç"] = token }));
+            new Dictionary<string, string> { ["belirtec"] = token }));
         confirmed.StatusCode.ShouldBe(HttpStatusCode.Redirect);
         var verify = await panel.GetStringAsync(confirmed.Headers.Location!.ToString());
         verify.ShouldContain("doğruland");

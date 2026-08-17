@@ -42,7 +42,7 @@ public sealed class ForgotPasswordHandler(
             var (token, _) = await UserTokenIssuer.IssueAsync(
                 db, clock, user.Id, UserTokenPurpose.PasswordReset, ct);
 
-            var link = $"{PanelBaseUrl(configuration)}/parola-sifirla?belirteç={Uri.EscapeDataString(token)}";
+            var link = $"{PanelBaseUrl(configuration)}/parola-sifirla?belirtec={Uri.EscapeDataString(token)}";
             await email.EnqueueAsync(
                 EmailTemplates.PasswordReset(user.Email, user.DisplayName, link, UserTokens.ResetLifetime), ct);
         }
@@ -176,7 +176,7 @@ public sealed class SendVerificationHandler(
             db, clock, account.Id, UserTokenPurpose.EmailVerification, ct);
 
         var link = $"{ForgotPasswordHandler.PanelBaseUrl(configuration)}"
-                   + $"/eposta-dogrula?belirteç={Uri.EscapeDataString(token)}";
+                   + $"/eposta-dogrula?belirtec={Uri.EscapeDataString(token)}";
 
         await email.EnqueueAsync(
             EmailTemplates.EmailVerification(account.Email, account.DisplayName, link, UserTokens.VerifyLifetime), ct);
