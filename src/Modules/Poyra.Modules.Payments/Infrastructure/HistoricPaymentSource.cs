@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Poyra.Modules.Installments.Contracts;
 using Poyra.Modules.Payments.Domain;
@@ -24,6 +25,7 @@ public sealed class HistoricPaymentSource(PaymentsDbContext db, IBinLookup bins)
                     intent.Currency,
                     intent.Installments,
                     intent.CreatedAt,
+                    intent.RoutingResultJson,
                     attempt.ConnectorAccountId,
                     attempt.MaskedPan,
                     AttemptedAt = attempt.CreatedAt,
@@ -37,8 +39,33 @@ public sealed class HistoricPaymentSource(PaymentsDbContext db, IBinLookup bins)
         foreach (var row in rows)
         {
             CardFacts? card = null;
-            if (ExtractBin(row.MaskedPan) is { } bin)
+            var hasDecisionCard = false;
+            var forced = false;
+            if (row.RoutingResultJson is { } decisionJson)
             {
+                try
+                {
+                    using var decision = JsonDocument.Parse(decisionJson);
+                    var root = decision.RootElement;
+                    forced = root.ValueKind == JsonValueKind.Object
+                             && root.TryGetProperty("forced", out var f)
+                             && f.ValueKind == JsonValueKind.True;
+
+                    // Karar ANINDA motorun gördüğü kart (null = bilinmiyordu) — birebir replay.
+                    // MaskedPan'dan türetmek sonradan-bilgi olurdu: hosted akışta kart, karar
+                    // verildikten sonra bankadan öğrenilir.
+                    hasDecisionCard = DecisionCardJson.TryRead(root, out card);
+                }
+                catch (JsonException)
+                {
+                    // bozuk kayıt — aşağıdaki MaskedPan yaklaşıklamasına düşülür
+                }
+            }
+
+            if (!hasDecisionCard && ExtractBin(row.MaskedPan) is { } bin)
+            {
+                // Eski kayıt (karar-anı kartı yazılmadan önce): MaskedPan'dan yaklaşıkla.
+                // Simülasyon penceresi kaydıkça bu dal kendiliğinden ölür.
                 if (!binCache.TryGetValue(bin, out card))
                 {
                     var info = await bins.FindAsync(bin, ct);
@@ -55,7 +82,7 @@ public sealed class HistoricPaymentSource(PaymentsDbContext db, IBinLookup bins)
             result.Add(new HistoricPayment(
                 row.PublicId, row.Id, row.AmountMinor, row.Currency, row.Installments,
                 row.AttemptedAt.ToOffset(TimeSpan.FromHours(3)).Hour, // TR saati
-                card, row.ConnectorAccountId, ActualCostMinor: null, row.CreatedAt));
+                card, row.ConnectorAccountId, ActualCostMinor: null, row.CreatedAt, forced));
         }
 
         return result;
