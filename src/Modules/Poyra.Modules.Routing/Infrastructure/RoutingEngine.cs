@@ -36,13 +36,8 @@ public sealed class RoutingEngine(
 
         var rule = await db.RoutingRules.AsNoTracking().SingleOrDefaultAsync(r => r.IsActive, ct);
         var document = rule is null ? new RuleDocument() : RuleDocument.Parse(rule.Document);
-        var guards = document.Guards;
 
-        var eligible = active
-            .Where(a => a.Health != ConnectorHealth.Down)
-            .Where(a => !guards.SkipUnhealthy || a.Health == ConnectorHealth.Healthy)
-            .ToList();
-
+        var eligible = FilterEligible(active, document.Guards);
         var skippedNote = active.Count != eligible.Count
             ? $" (sağlıksız {active.Count - eligible.Count} hesap atlandı)"
             : "";
@@ -52,7 +47,28 @@ public sealed class RoutingEngine(
                 0, rule?.Name, rule?.Version);
 
         var candidates = await BuildCandidatesAsync(eligible, facts, ct);
-        var byReference = BuildReferenceMap(eligible);
+        var decision = DecideCore(document, facts, candidates, rule?.Name, rule?.Version);
+        return skippedNote.Length == 0 ? decision : decision with { Reason = decision.Reason + skippedNote };
+    }
+
+    /// <summary>Down hesaplar her zaman, skipUnhealthy açıkken Degraded hesaplar da elenir.</summary>
+    public static List<ConnectorAccountSnapshot> FilterEligible(
+        IReadOnlyList<ConnectorAccountSnapshot> active, RuleGuards guards)
+        => active
+            .Where(a => a.Health != ConnectorHealth.Down)
+            .Where(a => !guards.SkipUnhealthy || a.Health == ConnectorHealth.Healthy)
+            .ToList();
+
+    /// <summary>
+    /// Karar çekirdeği (saf, DB'siz): kural → hacim bölüşümü → strateji, ardından failover
+    /// zinciri. Motor ve simülatör AYNI yoldan geçer — karar mantığı yalnız burada yaşar,
+    /// yoksa simülasyon gerçek davranıştan sapar.
+    /// </summary>
+    public static RoutingDecision DecideCore(
+        RuleDocument document, RoutingFacts facts, IReadOnlyList<RoutingCandidate> candidates,
+        string? ruleName = null, int? ruleVersion = null)
+    {
+        var byReference = BuildReferenceMap(candidates);
 
         List<RoutingCandidate> primary;
         string reason;
@@ -100,10 +116,10 @@ public sealed class RoutingEngine(
 
         return new RoutingDecision(
             chain,
-            reason + skippedNote,
-            Math.Max(1, guards.MaxAttempts),
-            rule?.Name,
-            rule?.Version,
+            reason,
+            Math.Max(1, document.Guards.MaxAttempts),
+            ruleName,
+            ruleVersion,
             strategy,
             [.. chain.Select(id => candidates.First(c => c.AccountId == id))]);
     }
@@ -118,22 +134,33 @@ public sealed class RoutingEngine(
         var performanceList = await performance.GetAsync(PerformanceWindow, ct);
         var performanceByAccount = performanceList.ToDictionary(p => p.ConnectorAccountId);
 
-        return eligible.Select(account =>
-        {
-            long? expectedCost = rateByAccount.TryGetValue(account.Id, out var bps)
-                ? (long)Math.Round(facts.AmountMinor * (bps / 10_000m), 0, MidpointRounding.ToEven)
-                : null;
+        return eligible
+            .Select(account => Enrich(account, facts.AmountMinor, rateByAccount, performanceByAccount))
+            .ToList();
+    }
 
-            performanceByAccount.TryGetValue(account.Id, out var stats);
-            var reliable = stats is { SampleSize: >= RoutingStrategies.MinimumSample };
+    /// <summary>
+    /// Tek hesabı sinyalleriyle adaya çevirir — motor ve simülatör AYNI zenginleştirmeden
+    /// geçer; yuvarlama, örnek eşiği veya yeni bir sinyal değişirse iki taraf birlikte değişir.
+    /// </summary>
+    public static RoutingCandidate Enrich(
+        ConnectorAccountSnapshot account, long amountMinor,
+        IReadOnlyDictionary<Guid, int> rateBpsByAccount,
+        IReadOnlyDictionary<Guid, ConnectorPerformance> performanceByAccount)
+    {
+        long? expectedCost = rateBpsByAccount.TryGetValue(account.Id, out var bps)
+            ? (long)Math.Round(amountMinor * (bps / 10_000m), 0, MidpointRounding.ToEven)
+            : null;
 
-            return new RoutingCandidate(
-                account.Id,
-                account.Label,
-                expectedCost,
-                reliable ? stats!.AuthRate : null,
-                reliable && stats!.MedianLatencyMs > 0 ? stats.MedianLatencyMs : null);
-        }).ToList();
+        performanceByAccount.TryGetValue(account.Id, out var stats);
+        var reliable = stats is { SampleSize: >= RoutingStrategies.MinimumSample };
+
+        return new RoutingCandidate(
+            account.Id,
+            account.Label,
+            expectedCost,
+            reliable ? stats!.AuthRate : null,
+            reliable && stats!.MedianLatencyMs > 0 ? stats.MedianLatencyMs : null);
     }
 
     private static string Normalize(string? strategy)
@@ -178,29 +205,29 @@ public sealed class RoutingEngine(
     private static string Kurus(long amountMinor)
         => (amountMinor / 100m).ToString("N2", CultureInfo.GetCultureInfo("tr-TR")) + " ₺";
 
-    private static Dictionary<string, ConnectorAccountSnapshot> BuildReferenceMap(
-        IReadOnlyList<ConnectorAccountSnapshot> accounts)
+    private static Dictionary<string, RoutingCandidate> BuildReferenceMap(
+        IReadOnlyList<RoutingCandidate> candidates)
     {
-        var map = new Dictionary<string, ConnectorAccountSnapshot>(StringComparer.OrdinalIgnoreCase);
-        foreach (var account in accounts)
+        var map = new Dictionary<string, RoutingCandidate>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in candidates)
         {
-            map.TryAdd(account.Label, account);
-            map.TryAdd(account.Id.ToString(), account);
+            map.TryAdd(candidate.Label, candidate);
+            map.TryAdd(candidate.AccountId.ToString(), candidate);
         }
 
         return map;
     }
 
     private static List<Guid> Resolve(
-        IEnumerable<string> references, Dictionary<string, ConnectorAccountSnapshot> map)
+        IEnumerable<string> references, Dictionary<string, RoutingCandidate> map)
         => references
             .Select(r => map.GetValueOrDefault(r))
-            .Where(a => a is not null)
-            .Select(a => a!.Id)
+            .Where(c => c is not null)
+            .Select(c => c!.AccountId)
             .ToList(); // bilinmeyen referanslar sessizce atlanır — hesap kapatılmış olabilir
 
     private static (Guid Id, string Label, int Bucket)? PickBySplit(
-        List<VolumeSplitEntry> split, Dictionary<string, ConnectorAccountSnapshot> map, Guid seed)
+        List<VolumeSplitEntry> split, Dictionary<string, RoutingCandidate> map, Guid seed)
     {
         // Deterministik kova: aynı intent her zaman aynı hesaba düşer (tekrar oynatılabilir karar)
         var bucket = (int)(BitConverter.ToUInt32(
@@ -210,8 +237,8 @@ public sealed class RoutingEngine(
         foreach (var entry in split)
         {
             cumulative += entry.Percent;
-            if (bucket < cumulative && map.TryGetValue(entry.Account, out var account))
-                return (account.Id, account.Label, bucket);
+            if (bucket < cumulative && map.TryGetValue(entry.Account, out var candidate))
+                return (candidate.AccountId, candidate.Label, bucket);
         }
 
         return null;

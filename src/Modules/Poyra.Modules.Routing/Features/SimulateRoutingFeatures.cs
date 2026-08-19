@@ -67,6 +67,12 @@ public sealed class SimulateRoutingValidator : AbstractValidator<SimulateRouting
 /// komisyon farkı ne olurdu hesaplanır. Hiçbir şey YAZILMAZ — salt okuma, yan etkisiz.
 /// Not: tahmin, komisyon anlaşması tanımlı işlemler üzerinden yapılır; tanımsızlar
 /// ayrıca sayılır (sessizce sıfır sayılmaz).
+/// Bilinen sınırlar (tahmin, birebir replay değildir):
+///  - Kart sinyalleri MaskedPan'dan SONRADAN kurulur; hosted akışta motor kararı kartsız
+///    vermiş olabilir — kart şartlı kurallar simülasyonda canlıdan daha cömert eşleşir.
+///  - Yürütme-anı elemeleri (taksit şeması tanımsız POS'un atlanması, konnektör çözüm
+///    hatası) simüle edilmez; hedef hesap motorun zincir başıdır.
+///  - Sağlık elemesi BUGÜNKÜ fotoğrafla yapılır — geçmişteki sağlık durumu bilinmez.
 /// </summary>
 public sealed class SimulateRoutingHandler(
     RoutingDbContext db,
@@ -83,6 +89,12 @@ public sealed class SimulateRoutingHandler(
         var active = await accounts.GetActiveAccountsAsync(ct);
         if (active.Count == 0)
             throw new PoyraException(409, "routing.no_account", "Aktif bağlantı hesabı yok.");
+
+        // Motorla aynı eleme: Down her zaman, skipUnhealthy açıkken Degraded da rota dışı
+        var eligible = RoutingEngine.FilterEligible(active, candidateDocument.Guards);
+        if (eligible.Count == 0)
+            throw new PoyraException(409, "routing.no_healthy_account",
+                "Tüm hesaplar sağlıksız — aday kural hiçbir işlemi yönlendiremezdi.");
 
         var labels = active.ToDictionary(a => a.Id, a => a.Label);
         var since = DateTimeOffset.UtcNow.AddDays(-query.Days);
@@ -106,22 +118,17 @@ public sealed class SimulateRoutingHandler(
                 ratesByInstallment[payment.Installments] = rateMap;
             }
 
-            var candidates = active
-                .Where(a => a.Health != ConnectorHealth.Down)
-                .Select(a =>
-                {
-                    long? cost = rateMap.TryGetValue(a.Id, out var bps)
-                        ? (long)Math.Round(payment.AmountMinor * (bps / 10_000m), 0, MidpointRounding.ToEven)
-                        : null;
-                    performanceByAccount.TryGetValue(a.Id, out var stats);
-                    var reliable = stats is { SampleSize: >= RoutingStrategies.MinimumSample };
-                    return new RoutingCandidate(a.Id, a.Label, cost,
-                        reliable ? stats!.AuthRate : null,
-                        reliable && stats!.MedianLatencyMs > 0 ? stats.MedianLatencyMs : null);
-                })
+            var candidates = eligible
+                .Select(a => RoutingEngine.Enrich(a, payment.AmountMinor, rateMap, performanceByAccount))
                 .ToList();
 
-            var (targetId, reason) = Decide(candidateDocument, payment, candidates);
+            // Ortak karar çekirdeği: kural → hacim bölüşümü → strateji — motor ne yaparsa o.
+            // Seed gerçek intent id'si olduğundan bölüşüm kovası da motordakiyle birebir aynı düşer.
+            var facts = new RoutingFacts(payment.Seed, payment.AmountMinor, payment.Currency,
+                payment.Installments, payment.HourLocal, payment.Card);
+            var decision = RoutingEngine.DecideCore(candidateDocument, facts, candidates);
+            var targetId = decision.AccountIds[0]; // eligible boş değil → zincir boş olamaz
+            var reason = decision.Reason;
 
             var actualCost = rateMap.TryGetValue(payment.ActualAccountId, out var actualBps)
                 ? (long?)Math.Round(payment.AmountMinor * (actualBps / 10_000m), 0, MidpointRounding.ToEven)
@@ -158,31 +165,6 @@ public sealed class SimulateRoutingHandler(
             changes.OrderByDescending(c => c.SavingMinor ?? 0).Take(100).ToList());
     }
 
-    /// <summary>Motorla AYNI karar sırası — simülasyon gerçeği yansıtsın diye ortak mantık.</summary>
-    private static (Guid AccountId, string Reason) Decide(
-        RuleDocument document, HistoricPayment payment, List<RoutingCandidate> candidates)
-    {
-        var facts = new RoutingFacts(payment.Seed, payment.AmountMinor, payment.Currency,
-            payment.Installments, payment.HourLocal, payment.Card);
-
-        var matched = RuleEvaluator.FirstMatch(document, facts);
-        var strategy = matched?.Strategy ?? document.Strategy ?? RoutingStrategies.Priority;
-
-        if (matched is not null && matched.Route.Count > 0)
-        {
-            var routed = candidates.FirstOrDefault(c =>
-                matched.Route.Contains(c.Label, StringComparer.OrdinalIgnoreCase)
-                || matched.Route.Contains(c.AccountId.ToString()));
-            if (routed is not null)
-                return (routed.AccountId, $"Kural: {matched.Reason ?? matched.Name ?? "adsız"}");
-        }
-
-        var ordered = RoutingStrategies.Order(candidates, strategy, document.Weights);
-        var winner = ordered.FirstOrDefault() ?? candidates[0];
-        return (winner.AccountId, strategy == RoutingStrategies.Priority
-            ? "Öncelik sırası"
-            : $"Strateji: {strategy}");
-    }
 }
 
 public sealed class SimulateRoutingEndpoint(IDispatcher dispatcher)

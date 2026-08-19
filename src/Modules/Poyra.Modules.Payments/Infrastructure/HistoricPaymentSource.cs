@@ -26,6 +26,7 @@ public sealed class HistoricPaymentSource(PaymentsDbContext db, IBinLookup bins)
                     intent.CreatedAt,
                     attempt.ConnectorAccountId,
                     attempt.MaskedPan,
+                    AttemptedAt = attempt.CreatedAt,
                 })
             .Take(Math.Clamp(limit, 1, 5_000))
             .ToListAsync(ct);
@@ -49,9 +50,11 @@ public sealed class HistoricPaymentSource(PaymentsDbContext db, IBinLookup bins)
                 }
             }
 
+            // Saat sinyali karar anına en yakın damgadan: rota kararı confirm isteğinde,
+            // ilk deneme açılmadan hemen önce verilir — intent'in oluşturulma saati değil.
             result.Add(new HistoricPayment(
                 row.PublicId, row.Id, row.AmountMinor, row.Currency, row.Installments,
-                row.CreatedAt.ToOffset(TimeSpan.FromHours(3)).Hour, // TR saati
+                row.AttemptedAt.ToOffset(TimeSpan.FromHours(3)).Hour, // TR saati
                 card, row.ConnectorAccountId, ActualCostMinor: null, row.CreatedAt));
         }
 

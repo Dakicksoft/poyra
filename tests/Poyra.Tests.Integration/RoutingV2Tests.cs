@@ -246,4 +246,92 @@ public sealed class RoutingV2Tests : IDisposable
         (await check.PaymentAttempts.AsNoTracking().CountAsync(a => a.ConnectorAccountId == ucuz.Id))
             .ShouldBe(0);
     }
+
+    [Fact]
+    public async Task Hacim_bolusumu_kovasi_oncelige_ragmen_uygulanmali()
+    {
+        var (tenant, ucuz, _) = await SeedAsync();
+        // %100 tek kovaya: tohum ne olursa olsun bölüşüm Ucuz POS'u seçmeli
+        await ActivateRuleAsync(tenant.ApiKey, new
+        {
+            volumeSplit = new[] { new { account = "Ucuz POS", percent = 100 } },
+        });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+        payment.Status.ShouldBe("requires_action");
+
+        // Öncelikte "Pahalı" önde olmasına rağmen bölüşüm kovası ucuzu seçmeli
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var attempt = await db.PaymentAttempts.AsNoTracking().SingleAsync();
+            attempt.ConnectorAccountId.ShouldBe(ucuz.Id);
+        }
+
+        var routing = await RoutingResultAsync(tenant.TenantId, payment.Id);
+        routing.GetProperty("reason").GetString().ShouldContain("Hacim bölüşümü");
+    }
+
+    [Fact]
+    public async Task Simulator_hacim_bolusumunu_motorla_ayni_uygulamali()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+        // Varsayılan öncelik: Pahalı POS önde → gerçek işlemler oraya gitsin
+        for (var i = 0; i < 2; i++)
+        {
+            var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+                new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+            await _client.PostAsync(payment.NextAction!.Url,
+                new FormUrlEncodedContent(payment.NextAction.Fields));
+        }
+
+        // Aday kural: hacmin %100'ü Ucuz POS kovasına → iki işlem de kaymalı.
+        // (Eski simülatör bölüşümü yok sayıp 0 değişim raporlardı — motor-simülatör tutarsızlığı.)
+        var simulation = await SendOk<SimulationResult>(HttpMethod.Post, "/v1/routing/simulate",
+            new
+            {
+                document = new { volumeSplit = new[] { new { account = "Ucuz POS", percent = 100 } } },
+                days = 1,
+                limit = 100,
+            },
+            ("X-Api-Key", tenant.ApiKey));
+
+        simulation.SampleSize.ShouldBe(2);
+        simulation.ChangedCount.ShouldBe(2);
+        simulation.Changes.ShouldAllBe(c => c.ToAccount == "Ucuz POS");
+        simulation.Changes[0].Reason.ShouldContain("Hacim bölüşümü");
+        simulation.EstimatedSavingMinor.ShouldBe(2_800); // 2 × 100.000 × (%3,20 − %1,80)
+    }
+
+    [Fact]
+    public async Task Simulator_bolusum_kovasinda_motorla_ayni_hesaba_dusmeli()
+    {
+        var (tenant, _, _) = await SeedAsync();
+        var document = new
+        {
+            volumeSplit = new[]
+            {
+                new { account = "Ucuz POS", percent = 50 },
+                new { account = "Pahalı POS", percent = 50 },
+            },
+        };
+        await ActivateRuleAsync(tenant.ApiKey, document);
+
+        // 8 gerçek ödeme: her biri kendi intent tohumuyla bir kovaya düşer
+        for (var i = 0; i < 8; i++)
+        {
+            var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+                new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+            await _client.PostAsync(payment.NextAction!.Url,
+                new FormUrlEncodedContent(payment.NextAction.Fields));
+        }
+
+        // AYNI doküman simüle edilince hiçbir işlem yer değiştirmemeli: simülatör motorla aynı
+        // tohumdan (intent id) aynı kovayı bulur. Tohumlar ayrışsaydı ~yarısı "değişti" çıkardı.
+        var simulation = await SendOk<SimulationResult>(HttpMethod.Post, "/v1/routing/simulate",
+            new { document, days = 1, limit = 100 }, ("X-Api-Key", tenant.ApiKey));
+
+        simulation.SampleSize.ShouldBe(8);
+        simulation.ChangedCount.ShouldBe(0);
+    }
 }
