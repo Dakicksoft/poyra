@@ -1,12 +1,17 @@
 namespace Poyra.Modules.Payments.Contracts;
 
+/// <param name="CardBank">
+/// Kartı çıkaran banka kodu — ekstre denetiminin bankaya özel (on-us) anlaşmayı
+/// seçebilmesi için. Denemede kaydedilmemişse null; o hâlde genel oran uygulanır.
+/// </param>
 public sealed record LedgerAttempt(
     Guid AttemptId,
     string PublicId, // att_… — bankaya giden sipariş no; ekstre satırının anahtarı
     Guid ConnectorAccountId,
     long ChargedAmountMinor,
     int Installments,
-    DateTimeOffset? CapturedAt);
+    DateTimeOffset? CapturedAt,
+    string? CardBank = null);
 
 public sealed record LedgerRefund(Guid RefundId, string PublicId, long AmountMinor);
 

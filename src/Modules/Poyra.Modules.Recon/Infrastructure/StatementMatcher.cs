@@ -23,9 +23,12 @@ public sealed class StatementMatcher(
             .OrderBy(l => l.LineNo)
             .ToListAsync(ct);
 
+        // Taksitle anahtarlanmaz: aynı taksit için hem genel hem bankaya özel (on-us) oran
+        // olabilir. Seçim satır satır, kartın bankasına göre CommissionAgreementResolver'da
+        // yapılır — rota ve alacak defteriyle aynı fonksiyon.
         var agreements = await db.CommissionAgreements.AsNoTracking()
             .Where(a => a.ConnectorAccountId == statement.ConnectorAccountId)
-            .ToDictionaryAsync(a => a.InstallmentCount, ct);
+            .ToListAsync(ct);
 
         // İş günü valör takvimi: hafta sonu + banka tatilleri (platform tablosu)
         var holidays = (await db.BankHolidays.AsNoTracking().Select(h => h.Day).ToListAsync(ct))
@@ -72,7 +75,7 @@ public sealed class StatementMatcher(
     private async Task MatchSaleLineAsync(
         ReconStatementLine line,
         ReconStatement statement,
-        IReadOnlyDictionary<int, CommissionAgreement> agreements,
+        IReadOnlyList<CommissionAgreement> agreements,
         IReadOnlySet<DateOnly> holidays,
         IReadOnlySet<Guid> auditedLineIds,
         HashSet<string> matchedSaleOrderIds,
@@ -99,7 +102,8 @@ public sealed class StatementMatcher(
         line.MatchStatus = LineMatchStatus.Matched;
         statement.MatchedCount++;
 
-        var agreement = agreements.GetValueOrDefault(attempt.Installments);
+        var agreement = CommissionAgreementResolver.Resolve(
+            agreements, attempt.Installments, attempt.CardBank);
 
         // Valör: beklenen hesaba geçiş = ekstre günü + anlaşma valörü kadar İŞ GÜNÜ
         // (hafta sonu + banka tatilleri atlanır)

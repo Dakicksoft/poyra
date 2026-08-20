@@ -3,13 +3,20 @@ namespace Poyra.Modules.Routing.Contracts;
 /// <param name="Bin">Kartın ilk 6-8 hanesi (PAN DEĞİL) — bilinmiyorsa null.</param>
 /// <param name="BankCode">Kartı çıkaran banka kodu — "on-us" kuralları için.</param>
 /// <param name="Program">bonus / world / maximum / axess / paraf / bankkart …</param>
+/// <param name="Country">
+/// Kartı çıkaran ülke (ISO-3166 alpha-2) — "yurt dışı kart → Stripe/Adyen" kuralları için.
+/// null = BİLİNMİYOR (BIN katalogda yok ya da kart henüz girilmedi); ülke kuralları
+/// eşleşmez. Bilinmeyeni "yabancı" saymak, katalogda eksik kalan bir TR BIN'ini yurt
+/// dışı rotasına yollardı — o rotada taksit yoktur, vade farkı sessizce kaybolurdu.
+/// </param>
 public sealed record CardFacts(
     string? Bin,
     string? BankCode,
     string? Program,
     string? Brand,
     string? CardType,
-    bool IsCommercial);
+    bool IsCommercial,
+    string? Country = null);
 
 /// <summary>
 /// Ödemenin Poyra'ya hangi yoldan girdiği. Kanal tahsilat davranışını değiştirir —
@@ -98,7 +105,14 @@ public sealed record ConnectorCommissionRate(Guid ConnectorAccountId, int Instal
 /// </summary>
 public interface ICommissionRateSource
 {
-    Task<IReadOnlyList<ConnectorCommissionRate>> GetRatesAsync(int installmentCount, CancellationToken ct);
+    /// <param name="cardBank">
+    /// Kartı çıkaran banka kodu — bankaya özel (on-us) oran varsa o seçilir, yoksa genel oran.
+    /// Kart bilinmiyorsa (hosted akışta müşteri henüz kart girmemişken) null geçilir ve
+    /// genel oran kullanılır: on-us varsayıp ucuz oran uydurmak, rotayı gerçekte daha
+    /// pahalı olan POS'a yönlendirirdi.
+    /// </param>
+    Task<IReadOnlyList<ConnectorCommissionRate>> GetRatesAsync(
+        int installmentCount, string? cardBank, CancellationToken ct);
 }
 
 /// <param name="AuthRate">0..1 — tamamlanan denemelerde başarı oranı.</param>

@@ -23,6 +23,7 @@ public static class DecisionCardJson
         brand = card.Brand,
         card_type = card.CardType,
         commercial = card.IsCommercial,
+        country = card.Country,
     };
 
     /// <summary>Yalnız 6+ haneli rakam dizisi BIN sayılır; ilk 6 hanesi saklanır, gerisi atılır.</summary>
@@ -52,7 +53,8 @@ public static class DecisionCardJson
             ReadString(node, "brand"),
             ReadString(node, "card_type"),
             node.TryGetProperty("commercial", out var commercial)
-                && commercial.ValueKind == JsonValueKind.True);
+                && commercial.ValueKind == JsonValueKind.True,
+            ReadString(node, "country"));
         return true;
     }
 

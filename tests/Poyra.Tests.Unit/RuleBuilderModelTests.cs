@@ -138,7 +138,8 @@ public sealed class RuleBuilderModelTests
     /// <summary>Her sinyali BİLİNEN bir işlem — katalog taramasının zemini.</summary>
     private static RoutingFacts TumSinyallerDolu()
         => new(Guid.NewGuid(), 150_000, "TRY", 6, 14,
-            new CardFacts("540061", "0062", "bonus", "mastercard", "credit", IsCommercial: true),
+            new CardFacts("540061", "0062", "bonus", "mastercard", "credit", IsCommercial: true,
+                Country: "TR"),
             PaymentChannels.Api);
 
     [Fact]

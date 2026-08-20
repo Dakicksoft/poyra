@@ -37,7 +37,15 @@ internal sealed class CommissionAgreementConfiguration : IEntityTypeConfiguratio
     {
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).ValueGeneratedNever();
-        b.HasIndex(x => new { x.TenantId, x.ConnectorAccountId, x.InstallmentCount }).IsUnique();
+        b.Property(x => x.BankCode).HasMaxLength(8);
+
+        // NULL = "genel oran" ve bir hesap × taksit için YALNIZ BİR genel oran olabilir.
+        // Postgres varsayılanında NULL'lar birbirinden farklı sayılır; öyle bırakılsaydı
+        // aynı taksit için sınırsız genel oran açılabilir, hangisinin geçerli olduğu
+        // rastgeleye kalırdı. NULLS NOT DISTINCT bunu veritabanı düzeyinde kapatır.
+        b.HasIndex(x => new { x.TenantId, x.ConnectorAccountId, x.InstallmentCount, x.BankCode })
+            .IsUnique()
+            .AreNullsDistinct(false);
         b.ToTable(t =>
         {
             t.HasCheckConstraint("ck_commission_agreements_count", "installment_count BETWEEN 1 AND 12");

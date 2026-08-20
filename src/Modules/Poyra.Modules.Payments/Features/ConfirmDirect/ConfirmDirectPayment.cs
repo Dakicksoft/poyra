@@ -362,7 +362,8 @@ public sealed class ConfirmDirectPaymentHandler(
 
     private async Task<CardFacts?> CardFactsAsync(string bin, string? program, CancellationToken ct)
         => await bins.FindAsync(bin, ct) is { } info
-            ? new CardFacts(info.Bin, info.BankCode, info.Program, info.Brand, info.CardType, info.IsCommercial)
+            ? new CardFacts(info.Bin, info.BankCode, info.Program, info.Brand, info.CardType,
+                info.IsCommercial, info.Country)
             : new CardFacts(bin, null, program, null, null, false); // katalogda yoksa yalnız BIN taşınır
 
     private async Task<CardData> ResolveCardAsync(ConfirmDirectPaymentCommand command, CancellationToken ct)

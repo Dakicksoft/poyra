@@ -9,6 +9,15 @@ public sealed class CommissionAgreement : ITenantOwned, IAuditable
     public Guid TenantId { get; init; }
     public Guid ConnectorAccountId { get; init; }
     public int InstallmentCount { get; set; } // 1 = tek çekim
+
+    /// <summary>
+    /// Kartı çıkaran bankanın kodu — <b>on-us</b> oranı için. null = GENEL oran
+    /// (bankası ne olursa olsun geçerli). Türkiye'de kendi bankanızın POS'undan kendi
+    /// bankanızın kartını çektiğinizde oran belirgin biçimde düşer; bu boyut olmadan
+    /// "en ucuz" stratejisi o farkı göremez ve rota sürekli yanlış POS'u seçer.
+    /// </summary>
+    public string? BankCode { get; set; }
+
     public int RateBps { get; set; } // 250 = %2,50
     public int ValorDays { get; set; } // hesaba geçiş gün sayısı
     public DateTimeOffset CreatedAt { get; set; }

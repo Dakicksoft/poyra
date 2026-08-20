@@ -256,6 +256,46 @@ public sealed class CardFactRuleTests
         PaymentChannels.IsKnown("checkout").ShouldBeFalse(); // checkout kanal değil, linkin görüldüğü yer
     }
 
+    [Fact]
+    public void Kart_ulkesi_kurali_yurt_disi_karti_ayirmali()
+    {
+        var doc = Doc("""
+            { "rules": [ { "name": "yurt-disi",
+                           "when": { "fact": "card.country", "op": "ne", "value": "TR" },
+                           "route": ["Stripe"], "reason": "yurt dışı kart → Stripe" } ] }
+            """);
+
+        RuleEvaluator.FirstMatch(doc, Facts(BonusKarti with { Country = "DE" }))!.Name.ShouldBe("yurt-disi");
+        RuleEvaluator.FirstMatch(doc, Facts(BonusKarti with { Country = "TR" })).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Ulke_bilinmiyorsa_ulke_kurallari_eslesmemeli()
+    {
+        // BIN katalogda yoksa ülke BİLİNMEZ. "Bilinmiyorsa yabancıdır" deseydik, katalogda
+        // eksik kalan bir TR BIN'i yurt dışı rotasına düşerdi — orada taksit yoktur ve
+        // vade farkı sessizce kaybolurdu.
+        var doc = Doc("""
+            { "rules": [ { "when": { "fact": "card.country", "op": "ne", "value": "TR" },
+                           "route": ["Stripe"] } ] }
+            """);
+
+        RuleEvaluator.FirstMatch(doc, Facts(BonusKarti with { Country = null })).ShouldBeNull();
+        RuleEvaluator.FirstMatch(doc, Facts(card: null)).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Ulke_takma_adiyla_da_yazilabilmeli()
+    {
+        var doc = Doc("""
+            { "rules": [ { "when": { "fact": "country", "op": "in", "value": ["DE","US"] },
+                           "route": ["Adyen"] } ] }
+            """);
+
+        RuleEvaluator.FirstMatch(doc, Facts(BonusKarti with { Country = "US" })).ShouldNotBeNull();
+        RuleEvaluator.FirstMatch(doc, Facts(BonusKarti with { Country = "TR" })).ShouldBeNull();
+    }
+
     private static RoutingFacts FactsWithChannel(string? channel)
         => new(Guid.NewGuid(), 50_000, "TRY", 1, 14, Card: null, Channel: channel);
 

@@ -61,6 +61,10 @@ public static class RuleFacts
             [("credit", "Kredi"), ("debit", "Banka"), ("prepaid", "Ön ödemeli")],
             Aliases: ["card_type"]),
         new("card.commercial", "Ticari kart", FactKind.Boolean, "Kurumsal/ticari kartlar"),
+        new("card.country", "Kart ülkesi", FactKind.Text,
+            "ISO-3166 alpha-2: TR, DE, US… — yurt dışı kartı Stripe/Adyen'e yollamak için "
+            + "(BIN katalogda yoksa ülke bilinmez ve kural eşleşmez)",
+            Aliases: ["country"]),
     ];
 
     public static FactDefinition? Find(string? fact)

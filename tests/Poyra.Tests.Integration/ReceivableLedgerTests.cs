@@ -125,7 +125,7 @@ public sealed class ReceivableLedgerTests : IDisposable
         }, ("X-Api-Key", apiKey));
 
     /// <summary>Gerçek ödeme akışı: create → confirm → banka formu → callback.</summary>
-    private async Task<string> PayAsync(string apiKey, long amountMinor)
+    private async Task<string> PayAsync(string apiKey, long amountMinor, string? bin = null)
     {
         var created = await ApiOk<PaymentDto>(HttpMethod.Post, "/v1/payments", new
         {
@@ -135,7 +135,7 @@ public sealed class ReceivableLedgerTests : IDisposable
         }, ("X-Api-Key", apiKey));
 
         var confirmed = await ApiOk<PaymentDto>(
-            HttpMethod.Post, $"/v1/payments/{created.Id}/confirm", new { }, ("X-Api-Key", apiKey));
+            HttpMethod.Post, $"/v1/payments/{created.Id}/confirm", new { bin }, ("X-Api-Key", apiKey));
 
         confirmed.NextAction.ShouldNotBeNull();
         var callback = await _apiNoRedirect.PostAsync(confirmed.NextAction!.Url,
@@ -272,7 +272,7 @@ public sealed class ReceivableLedgerTests : IDisposable
         summary.ConfirmedMinor.ShouldBe(97_500); // beklenen net üzerinden
     }
 
-    private async Task UploadStatementAsync(string apiKey, Guid accountId, DateOnly day, string csv)
+    private async Task<Guid> UploadStatementAsync(string apiKey, Guid accountId, DateOnly day, string csv)
     {
         using var content = new MultipartFormDataContent();
         var file = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(csv));
@@ -290,6 +290,120 @@ public sealed class ReceivableLedgerTests : IDisposable
 
         var response = await _api.SendAsync(request);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+
+        return System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("id").GetGuid();
+    }
+
+    private sealed record CommissionFindingDto(
+        string OrderId, int Installments, long GrossMinor, int? AgreedRateBps,
+        long? ExpectedCommissionMinor, long ActualCommissionMinor, long? DeltaMinor);
+
+    private sealed record CommissionReportDto(
+        Guid StatementId, DateOnly StatementDate, long ExpectedCommissionSum,
+        long ActualCommissionSum, long DeltaSum, int OverchargedCount, int UnderchargedCount,
+        int AgreementMissingCount, List<CommissionFindingDto> Discrepancies);
+
+    /// <summary>
+    /// F3'ün ASIL İDDİASI: on-us oranı üç tüketicide de AYNI çözülür — rota maliyeti,
+    /// alacak defteri ve ekstre denetimi. Ayrışsalardı sonuç sessiz bir yanlış değil,
+    /// BANKAYA HAKSIZ SUÇLAMA olurdu: defter genel oranı (%2,50) beklerdi, banka doğru
+    /// on-us oranını (%1,20) keserdi ve denetim "banka 13,00 ₺ eksik kesmiş" diye sahte
+    /// bulgu açardı. Bu test farkın SIFIR olmasını arar.
+    /// </summary>
+    [Fact]
+    public async Task On_us_orani_defterde_ve_denetimde_rotayla_AYNI_cozulmeli()
+    {
+        var (tenant, accountId) = await SeedAsync();
+
+        await ApiOk<object>(HttpMethod.Post, "/v1/bins", new
+        {
+            bins = new[]
+            {
+                new
+                {
+                    bin = "540061", bankCode = "0062", bankName = "Garanti", program = "bonus",
+                    brand = "mastercard", cardType = "credit", isCommercial = false,
+                },
+            },
+        }, ("X-Platform-Key", AdminKey));
+
+        // Genel oran %2,50; Garanti kartına özel (on-us) %1,20
+        await AgreeAsync(tenant.ApiKey, accountId, rateBps: 250, valorDays: 1);
+        await ApiOk<object>(HttpMethod.Post, "/v1/recon/agreements", new
+        {
+            connectorAccountId = accountId,
+            installmentCount = 1,
+            rateBps = 120,
+            valorDays = 1,
+            bankCode = "0062",
+        }, ("X-Api-Key", tenant.ApiKey));
+
+        await PayAsync(tenant.ApiKey, 1_000_00, bin: "540061");
+        await ProjectAsync();
+
+        // DEFTER: beklenen komisyon on-us oranından — 1.000,00 ₺ × %1,20 = 12,00 ₺
+        var receivable = (await ApiOk<List<ReceivableDto>>(
+            HttpMethod.Get, "/v1/receivables", null, ("X-Api-Key", tenant.ApiKey))).ShouldHaveSingleItem();
+        receivable.ExpectedRateBps.ShouldBe(120);
+        receivable.ExpectedCommissionMinor.ShouldBe(1_200);
+
+        // Banka ekstresi: on-us oranını DOĞRU kesmiş (12,00 ₺)
+        var day = DateOnly.FromDateTime(DateTime.UtcNow);
+        var csv = "order_id;type;gross;commission;net;value_date\n"
+                  + $"{receivable.AttemptId};sale;100000;1200;98800;{day:yyyy-MM-dd}\n";
+        var statementId = await UploadStatementAsync(tenant.ApiKey, accountId, day, csv);
+
+        // DENETİM: fark SIFIR — banka suçlanmıyor
+        var report = await ApiOk<CommissionReportDto>(
+            HttpMethod.Get, $"/v1/recon/statements/{statementId}/commission-report", null,
+            ("X-Api-Key", tenant.ApiKey));
+
+        report.ExpectedCommissionSum.ShouldBe(1_200);
+        report.ActualCommissionSum.ShouldBe(1_200);
+        report.DeltaSum.ShouldBe(0);
+        report.UnderchargedCount.ShouldBe(0);
+        report.OverchargedCount.ShouldBe(0);
+        report.Discrepancies.ShouldBeEmpty();
+
+        var after = (await ApiOk<List<ReceivableDto>>(
+            HttpMethod.Get, "/v1/receivables", null, ("X-Api-Key", tenant.ApiKey))).ShouldHaveSingleItem();
+        after.CommissionDeltaMinor.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Baska_bankanin_kartinda_GENEL_oran_uygulanmali()
+    {
+        // On-us anlaşması yalnız kendi bankasının kartına geçerlidir; başka bankanın
+        // kartında genel oran beklenmeli, yoksa defter eksik alacak yazar.
+        var (tenant, accountId) = await SeedAsync();
+
+        await ApiOk<object>(HttpMethod.Post, "/v1/bins", new
+        {
+            bins = new[]
+            {
+                new
+                {
+                    bin = "450803", bankCode = "0064", bankName = "İş Bankası", program = "maximum",
+                    brand = "visa", cardType = "credit", isCommercial = false,
+                },
+            },
+        }, ("X-Platform-Key", AdminKey));
+
+        await AgreeAsync(tenant.ApiKey, accountId, rateBps: 250, valorDays: 1);
+        await ApiOk<object>(HttpMethod.Post, "/v1/recon/agreements", new
+        {
+            connectorAccountId = accountId, installmentCount = 1, rateBps = 120, valorDays = 1,
+            bankCode = "0062",
+        }, ("X-Api-Key", tenant.ApiKey));
+
+        await PayAsync(tenant.ApiKey, 1_000_00, bin: "450803");
+        await ProjectAsync();
+
+        var receivable = (await ApiOk<List<ReceivableDto>>(
+            HttpMethod.Get, "/v1/receivables", null, ("X-Api-Key", tenant.ApiKey))).ShouldHaveSingleItem();
+        receivable.ExpectedRateBps.ShouldBe(250);
+        receivable.ExpectedCommissionMinor.ShouldBe(2_500);
     }
 
     // ------------------------------------------------------------------ iade

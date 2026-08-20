@@ -595,4 +595,134 @@ public sealed class RoutingV2Tests : IDisposable
         attempt.ConnectorAccountId.ShouldBe(ucuz.Id); // saha kuralı eşleşmedi → strateji
     }
 
+
+    [Fact]
+    public async Task On_us_orani_cheapest_stratejisinin_kazananini_degistirmeli()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        // "Pahalı POS" aslında Garanti'nin POS'u: kendi kartına %1,20 (on-us), gerisine %3,20.
+        // Genel oranlarda Ucuz POS (%1,80) kazanır; Garanti kartında on-us öne geçmeli.
+        await SendOk<object>(HttpMethod.Post, "/v1/recon/agreements",
+            new { connectorAccountId = pahali.Id, installmentCount = 1, rateBps = 120, valorDays = 1,
+                  bankCode = "0062" },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await SendOk<object>(HttpMethod.Post, "/v1/bins", new
+        {
+            bins = new[]
+            {
+                new
+                {
+                    bin = "540061", bankCode = "0062", bankName = "Garanti", program = "bonus",
+                    brand = "mastercard", cardType = "credit", isCommercial = false,
+                },
+                new
+                {
+                    bin = "450803", bankCode = "0064", bankName = "İş Bankası", program = "maximum",
+                    brand = "visa", cardType = "credit", isCommercial = false,
+                },
+            },
+        }, ("X-Platform-Key", AdminKey));
+
+        await ActivateRuleAsync(tenant.ApiKey, new { strategy = "cheapest" });
+
+        // Garanti kartı: on-us %1,20 → Pahalı POS
+        var onUs = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY" }, ("X-Api-Key", tenant.ApiKey));
+        await SendOk<PaymentDto>(HttpMethod.Post, $"/v1/payments/{onUs.Id}/confirm",
+            new { bin = "540061" }, ("X-Api-Key", tenant.ApiKey));
+
+        // İş Bankası kartı: on-us yok → genel oranlar → Ucuz POS
+        var offUs = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY" }, ("X-Api-Key", tenant.ApiKey));
+        await SendOk<PaymentDto>(HttpMethod.Post, $"/v1/payments/{offUs.Id}/confirm",
+            new { bin = "450803" }, ("X-Api-Key", tenant.ApiKey));
+
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
+        var attempts = await db.PaymentAttempts.AsNoTracking()
+            .Join(db.PaymentIntents.AsNoTracking(), a => a.PaymentIntentId, i => i.Id,
+                (a, i) => new { i.PublicId, a.ConnectorAccountId })
+            .ToListAsync();
+
+        attempts.Single(a => a.PublicId == onUs.Id).ConnectorAccountId.ShouldBe(pahali.Id);
+        attempts.Single(a => a.PublicId == offUs.Id).ConnectorAccountId.ShouldBe(ucuz.Id);
+
+        // Gerekçe on-us oranını yazmalı: 100.000 kuruş × %1,20 = 1.200 kuruş = 12,00 ₺
+        (await RoutingResultAsync(tenant.TenantId, onUs.Id))
+            .GetProperty("reason").GetString().ShouldContain("12,00 ₺");
+    }
+
+    [Fact]
+    public async Task Kart_bilinmiyorsa_on_us_orani_uygulanmamali()
+    {
+        // Hosted akışta müşteri henüz kart girmemiş olabilir (bin gönderilmez). On-us
+        // varsayıp ucuz oran seçmek, rotayı gerçekte daha PAHALI olan POS'a yollardı.
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        await SendOk<object>(HttpMethod.Post, "/v1/recon/agreements",
+            new { connectorAccountId = pahali.Id, installmentCount = 1, rateBps = 120, valorDays = 1,
+                  bankCode = "0062" },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await ActivateRuleAsync(tenant.ApiKey, new { strategy = "cheapest" });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
+        (await db.PaymentAttempts.AsNoTracking().SingleAsync())
+            .ConnectorAccountId.ShouldBe(ucuz.Id); // genel oranlar: %1,80 < %3,20
+    }
+
+    [Fact]
+    public async Task Yurt_disi_kart_kurali_ulke_koduyla_eslesmeli()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        await SendOk<object>(HttpMethod.Post, "/v1/bins", new
+        {
+            bins = new[]
+            {
+                new
+                {
+                    bin = "411111", bankCode = "XXXX", bankName = "Yabancı Banka", program = "other",
+                    brand = "visa", cardType = "credit", isCommercial = false, country = "DE",
+                },
+            },
+        }, ("X-Platform-Key", AdminKey));
+
+        // Yurt dışı kart "Pahalı POS"a (e-ihracat hattı senaryosu); gerisi en ucuza
+        await ActivateRuleAsync(tenant.ApiKey, new
+        {
+            strategy = "cheapest",
+            rules = new[]
+            {
+                new
+                {
+                    name = "yurt-disi",
+                    when = new { fact = "card.country", op = "ne", value = "TR" },
+                    route = new[] { "Pahalı POS" },
+                    reason = "yurt dışı kart → e-ihracat hattı",
+                },
+            },
+        });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY" }, ("X-Api-Key", tenant.ApiKey));
+        await SendOk<PaymentDto>(HttpMethod.Post, $"/v1/payments/{payment.Id}/confirm",
+            new { bin = "411111" }, ("X-Api-Key", tenant.ApiKey));
+
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
+        (await db.PaymentAttempts.AsNoTracking().SingleAsync())
+            .ConnectorAccountId.ShouldBe(pahali.Id);
+
+        (await RoutingResultAsync(tenant.TenantId, payment.Id))
+            .GetProperty("reason").GetString().ShouldContain("yurt dışı");
+
+        // Karar-anı kartına ülke de yazıldı — simülatör aynı kararı yeniden oynatabilsin
+        (await RoutingResultAsync(tenant.TenantId, payment.Id))
+            .GetProperty("card").GetProperty("country").GetString().ShouldBe("DE");
+    }
+
 }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Poyra.Modules.Recon;
@@ -11,9 +12,11 @@ using Poyra.Modules.Recon;
 namespace Poyra.Modules.Recon.Migrations
 {
     [DbContext(typeof(ReconDbContext))]
-    partial class ReconDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260820184315_AddBankCodeToCommissionAgreements")]
+    partial class AddBankCodeToCommissionAgreements
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

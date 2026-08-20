@@ -36,6 +36,10 @@ internal sealed class CardBinConfiguration : IEntityTypeConfiguration<CardBin>
         b.Property(x => x.Program).HasMaxLength(20);
         b.Property(x => x.Brand).HasMaxLength(20);
         b.Property(x => x.CardType).HasMaxLength(10);
+
+        // Varsayılan veritabanı düzeyinde de durur: alan eklenmeden önceki BIN'ler ve
+        // ham SQL ile eklenen kayıtlar TR olur — yurt dışı kart ancak AÇIKÇA işaretlenir.
+        b.Property(x => x.Country).HasMaxLength(2).IsFixedLength().HasDefaultValue("TR");
         b.HasIndex(x => x.Program);
     }
 }

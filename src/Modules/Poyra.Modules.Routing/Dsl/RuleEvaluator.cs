@@ -43,9 +43,11 @@ public static class RuleEvaluator
             .Set("card.brand", card?.Brand)
             .Set("card.type", card?.CardType)
             .Set("card.commercial", card?.IsCommercial)
+            .Set("card.country", card?.Country)
             .Alias("bank_code", "card.bank")
             .Alias("program", "card.program")
             .Alias("brand", "card.brand")
-            .Alias("card_type", "card.type");
+            .Alias("card_type", "card.type")
+            .Alias("country", "card.country");
     }
 }

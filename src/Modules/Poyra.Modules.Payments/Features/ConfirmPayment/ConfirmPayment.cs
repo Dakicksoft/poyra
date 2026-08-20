@@ -198,7 +198,7 @@ public sealed class ConfirmPaymentHandler(
 
         if (bin is not null && await bins.FindAsync(bin, ct) is { } info)
             return new CardFacts(info.Bin, info.BankCode, info.Program, info.Brand,
-                info.CardType, info.IsCommercial);
+                info.CardType, info.IsCommercial, info.Country);
 
         return bin is null && program is null
             ? null

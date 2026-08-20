@@ -73,7 +73,7 @@ public sealed class HistoricPaymentSource(PaymentsDbContext db, IBinLookup bins)
                     card = info is null
                         ? new CardFacts(bin, null, null, null, null, false)
                         : new CardFacts(info.Bin, info.BankCode, info.Program, info.Brand,
-                            info.CardType, info.IsCommercial);
+                            info.CardType, info.IsCommercial, info.Country);
                     binCache[bin] = card;
                 }
             }

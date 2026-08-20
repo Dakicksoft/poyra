@@ -106,7 +106,9 @@ public sealed class SimulateRoutingHandler(
         // Sinyaller bir kez çekilir; taksit sayısına göre oran tablosu önbelleklenir
         var performanceByAccount = (await performance.GetAsync(RoutingEngine.PerformanceWindow, ct))
             .ToDictionary(p => p.ConnectorAccountId);
-        var ratesByInstallment = new Dictionary<int, Dictionary<Guid, int>>();
+        // Önbellek anahtarı BANKAYI da taşır: on-us oranı karta göre değişir, yalnız
+        // taksitle anahtarlansaydı ilk işlemin bankası bütün işlemlere uygulanırdı.
+        var ratesByKey = new Dictionary<(int Installments, string? Bank), Dictionary<Guid, int>>();
         var feasibleByKey = new Dictionary<(int Installments, string? Program), IReadOnlySet<Guid>>();
 
         var changes = new List<SimulationChangeDto>();
@@ -123,11 +125,12 @@ public sealed class SimulateRoutingHandler(
                 continue;
             }
 
-            if (!ratesByInstallment.TryGetValue(payment.Installments, out var rateMap))
+            var rateKey = (payment.Installments, payment.Card?.BankCode);
+            if (!ratesByKey.TryGetValue(rateKey, out var rateMap))
             {
-                rateMap = (await rates.GetRatesAsync(payment.Installments, ct))
+                rateMap = (await rates.GetRatesAsync(rateKey.Installments, rateKey.Item2, ct))
                     .ToDictionary(r => r.ConnectorAccountId, r => r.RateBps);
-                ratesByInstallment[payment.Installments] = rateMap;
+                ratesByKey[rateKey] = rateMap;
             }
 
             var candidates = eligible

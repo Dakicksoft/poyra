@@ -149,7 +149,8 @@ public sealed class RoutingEngine(
     private async Task<List<RoutingCandidate>> BuildCandidatesAsync(
         List<ConnectorAccountSnapshot> eligible, RoutingFacts facts, CancellationToken ct)
     {
-        var rateList = await rates.GetRatesAsync(facts.Installments, ct);
+        // Kart bankası maliyet sorgusuna girer: on-us oranı ancak kart biliniyorsa uygulanır
+        var rateList = await rates.GetRatesAsync(facts.Installments, facts.Card?.BankCode, ct);
         var rateByAccount = rateList.ToDictionary(r => r.ConnectorAccountId, r => r.RateBps);
 
         var performanceList = await performance.GetAsync(PerformanceWindow, ct);
