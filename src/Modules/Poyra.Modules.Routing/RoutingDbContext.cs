@@ -13,6 +13,7 @@ public sealed class RoutingDbContext(DbContextOptions<RoutingDbContext> options,
     public const string MigrationsHistoryTable = "__ef_migrations_routing";
 
     public DbSet<RoutingRule> RoutingRules => Set<RoutingRule>();
+    public DbSet<VolumeCommitment> VolumeCommitments => Set<VolumeCommitment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -37,6 +38,22 @@ internal sealed class RoutingRuleConfiguration : IEntityTypeConfiguration<Routin
         b.HasIndex(x => new { x.TenantId, x.IsActive })
             .HasFilter("is_active = true")
             .IsUnique();
+    }
+}
+
+internal sealed class VolumeCommitmentConfiguration : IEntityTypeConfiguration<VolumeCommitment>
+{
+    public void Configure(EntityTypeBuilder<VolumeCommitment> b)
+    {
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).ValueGeneratedNever();
+
+        // Hesap başına tek taahhüt: iki ayrı hedef hangisinin geçerli olduğunu belirsiz
+        // bırakır ve rota gerekçesi anlamını yitirir. Değişiklik güncellemedir.
+        b.HasIndex(x => new { x.TenantId, x.ConnectorAccountId }).IsUnique();
+
+        b.ToTable(t => t.HasCheckConstraint(
+            "ck_volume_commitments_target", "monthly_target_minor > 0"));
     }
 }
 

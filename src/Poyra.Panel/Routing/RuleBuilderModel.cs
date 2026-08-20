@@ -152,6 +152,7 @@ public sealed class RuleBuilderModel
         ("best_success", "En yüksek başarı"),
         ("fastest", "En hızlı yanıt"),
         ("balanced", "Dengeli (ağırlıklı)"),
+        ("commitment", "Hacim taahhüdü"),
     ];
 
     public static RuleBuilderModel FromJson(JsonElement document)

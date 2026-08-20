@@ -42,6 +42,21 @@ else
             <strong>@account.Label</strong>
             <span class="hint">öncelik @account.Priority</span>
             <span class="badge @Fmt.HealthClass(account.Health)">@Fmt.Health(account.Health)</span>
+            @if (_commitments.FirstOrDefault(c => c.ConnectorAccountId == account.Id && c.IsActive)
+                 is { } commitment)
+            {
+                <span class="hint">
+                    taahhüt @Fmt.Money(commitment.MonthlyTargetMinor, "TRY")/ay —
+                    @if (commitment.GapMinor > 0)
+                    {
+                        <text>kalan @Fmt.Money(commitment.GapMinor, "TRY") / @commitment.DaysLeft gün</text>
+                    }
+                    else
+                    {
+                        <text>tamamlandı</text>
+                    }
+                </span>
+            }
         </li>
     }
 </ul>
@@ -298,6 +313,7 @@ else
     private RoutingRuleResponse? _active;
     private IReadOnlyList<RoutingRuleResponse> _rules = [];
     private IReadOnlyList<ConnectorAccountResponse> _accounts = [];
+    private IReadOnlyList<VolumeCommitmentDto> _commitments = [];
     private IReadOnlyList<string> _accountLabels = [];
     private SimulationResultDto? _simulation;
     private RuleBuilderModel _model = new();
@@ -323,6 +339,7 @@ else
         _active = await Dispatcher.Ask(new GetActiveRuleQuery());
         _rules = await Dispatcher.Ask(new ListRoutingRulesQuery());
         _accounts = await Dispatcher.Ask(new ListConnectorAccountsQuery());
+        _commitments = await Dispatcher.Ask(new ListVolumeCommitmentsQuery());
         _accountLabels = _accounts.Select(a => a.Label).ToList();
 
         if (_active is not null && _simulation is null)

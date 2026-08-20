@@ -10,12 +10,13 @@ public static class RoutingStrategies
     public const string BestSuccess = "best_success";
     public const string Fastest = "fastest";
     public const string Balanced = "balanced";
+    public const string Commitment = "commitment";
 
     /// <summary>Performans sinyali bu örnek sayısının altındaysa güvenilmez sayılır.</summary>
     public const int MinimumSample = 20;
 
     public static bool IsKnown(string strategy)
-        => strategy is Priority or Cheapest or BestSuccess or Fastest or Balanced;
+        => strategy is Priority or Cheapest or BestSuccess or Fastest or Balanced or Commitment;
 
     /// <summary>
     /// Strateji ÖLÇÜLEN sinyale mi dayanıyor? Ölçülen sinyaller (başarı oranı, gecikme)
@@ -43,6 +44,10 @@ public static class RoutingStrategies
     /// Adayları stratejiye göre sıralar. Sinyali OLMAYAN aday elenmez — sona alınır:
     /// yeni eklenen bir POS "veri yok" diye tamamen dışlanmaz, ama öne de geçmez.
     /// Eşitlikte öncelik sırası (giriş sırası) korunur — karar deterministiktir.
+    ///
+    /// <c>commitment</c>: taahhüdü olmayan ya da taahhüdünü TUTMUŞ hesabın aciliyeti
+    /// 0'dır; açığı olanların arkasına düşer ama elenmez. Böylece açık kapanınca hesap
+    /// kendiliğinden öncelik sırasına döner — bunun için ayrı bir kural gerekmez.
     /// </summary>
     public static IReadOnlyList<RoutingCandidate> Order(
         IReadOnlyList<RoutingCandidate> candidates, string strategy, StrategyWeights weights)
@@ -52,6 +57,7 @@ public static class RoutingStrategies
             BestSuccess => [.. candidates.OrderByDescending(c => c.AuthRate ?? -1)],
             Fastest => [.. candidates.OrderBy(c => c.MedianLatencyMs ?? int.MaxValue)],
             Balanced => [.. candidates.OrderByDescending(c => Score(c, candidates, weights))],
+            Commitment => [.. candidates.OrderByDescending(c => c.Commitment?.RequiredDailyMinor ?? 0)],
             _ => candidates, // priority: gelen sıra (hesap önceliği) korunur
         };
 

@@ -725,4 +725,101 @@ public sealed class RoutingV2Tests : IDisposable
             .GetProperty("card").GetProperty("country").GetString().ShouldBe("DE");
     }
 
+
+    private sealed record CommitmentDto(
+        Guid Id, Guid ConnectorAccountId, long MonthlyTargetMinor, bool IsActive,
+        long AchievedMinor, long GapMinor, int DaysLeft);
+
+    [Fact]
+    public async Task Taahhut_acigi_olan_hesap_one_alinmali_acik_kapaninca_geri_dusmeli()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        // "Pahalı POS"a aylık 2.000,00 ₺ taahhüt. cheapest olsaydı hep Ucuz POS kazanırdı;
+        // taahhüt stratejisi açığı olan hesabı öne alır.
+        await SendOk<CommitmentDto>(HttpMethod.Post, "/v1/routing/commitments",
+            new { connectorAccountId = pahali.Id, monthlyTargetMinor = 2_000_00 },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await ActivateRuleAsync(tenant.ApiKey, new { strategy = "commitment" });
+
+        // İlk işlem: açık tam → Pahalı POS
+        var ilk = await PayAsync(tenant.ApiKey, 1_500_00);
+
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var attempt = await db.PaymentAttempts.AsNoTracking()
+                .Join(db.PaymentIntents.AsNoTracking(), a => a.PaymentIntentId, i => i.Id,
+                    (a, i) => new { i.PublicId, a.ConnectorAccountId })
+                .SingleAsync(x => x.PublicId == ilk);
+            attempt.ConnectorAccountId.ShouldBe(pahali.Id);
+        }
+
+        (await RoutingResultAsync(tenant.TenantId, ilk))
+            .GetProperty("reason").GetString().ShouldContain("kalan 2.000,00 ₺");
+
+        // İlerleme uca da yansımalı
+        var afterFirst = (await SendOk<List<CommitmentDto>>(
+            HttpMethod.Get, "/v1/routing/commitments", null, ("X-Api-Key", tenant.ApiKey)))
+            .ShouldHaveSingleItem();
+        afterFirst.AchievedMinor.ShouldBe(1_500_00);
+        afterFirst.GapMinor.ShouldBe(500_00);
+
+        // İkinci işlem açığı kapatır (toplam 3.000 > 2.000 hedef)
+        await PayAsync(tenant.ApiKey, 1_500_00);
+
+        var afterSecond = (await SendOk<List<CommitmentDto>>(
+            HttpMethod.Get, "/v1/routing/commitments", null, ("X-Api-Key", tenant.ApiKey)))
+            .ShouldHaveSingleItem();
+        afterSecond.AchievedMinor.ShouldBe(3_000_00);
+        afterSecond.GapMinor.ShouldBe(0); // açık kapandı
+
+        // Artık aciliyet 0 → öncelik sırasına dönüldü ("Pahalı POS" priority=1 ile önde)
+        var ucuncu = await PayAsync(tenant.ApiKey, 100_00);
+        (await RoutingResultAsync(tenant.TenantId, ucuncu))
+            .GetProperty("reason").GetString().ShouldContain("açığı olan taahhüt yok");
+    }
+
+    [Fact]
+    public async Task Taahhut_pasife_cekilince_rotayi_etkilememeli_ama_silinmemeli()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        var commitment = await SendOk<CommitmentDto>(HttpMethod.Post, "/v1/routing/commitments",
+            new { connectorAccountId = pahali.Id, monthlyTargetMinor = 5_000_00 },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await ActivateRuleAsync(tenant.ApiKey, new { strategy = "commitment" });
+
+        var deleted = await Send(HttpMethod.Delete, $"/v1/routing/commitments/{commitment.Id}", null,
+            ("X-Api-Key", tenant.ApiKey));
+        deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        var payment = await PayAsync(tenant.ApiKey, 1_000_00);
+        (await RoutingResultAsync(tenant.TenantId, payment))
+            .GetProperty("reason").GetString().ShouldContain("açığı olan taahhüt yok");
+
+        // Kayıt SİLİNMEDİ — geçmiş rota kararlarının gerekçesi burada durur (İlke 3)
+        await using var routing = _fixture.CreateRouting(PostgresFixture.TenantCtx(tenant.TenantId));
+        var row = await routing.VolumeCommitments.AsNoTracking().SingleAsync();
+        row.IsActive.ShouldBeFalse();
+        row.MonthlyTargetMinor.ShouldBe(5_000_00);
+    }
+
+    /// <summary>Gerçek ödeme: create → confirm → banka formu → callback (tahsil edilmiş olur).</summary>
+    private async Task<string> PayAsync(string apiKey, long amountMinor)
+    {
+        var created = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor, currency = "TRY", confirm = true }, ("X-Api-Key", apiKey));
+
+        created.NextAction.ShouldNotBeNull();
+        using var noRedirect = _factory.CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var callback = await noRedirect.PostAsync(created.NextAction!.Url,
+            new FormUrlEncodedContent(created.NextAction.Fields));
+        callback.IsSuccessStatusCode.ShouldBeTrue(await callback.Content.ReadAsStringAsync());
+
+        return created.Id;
+    }
+
 }

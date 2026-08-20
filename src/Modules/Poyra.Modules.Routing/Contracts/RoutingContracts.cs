@@ -65,13 +65,36 @@ public sealed record RoutingFacts(
 /// <param name="Label">Panelde/gerekçede okunur ad.</param>
 /// <param name="ExpectedCostMinor">Beklenen komisyon (anlaşma oranından) — bilinmiyorsa null.</param>
 /// <param name="AuthRate">Son penceredeki başarı oranı (0..1) — örnek yetersizse null.</param>
+/// <summary>
+/// Bir hesabın bu dönemdeki hacim taahhüdü ve nerede olduğu.
+/// </summary>
+/// <param name="TargetMinor">Dönem için bankaya söz verilen hacim.</param>
+/// <param name="AchievedMinor">Dönem başından beri o hesaba GERÇEKTEN giden hacim.</param>
+/// <param name="DaysLeft">Dönemin bitimine kalan gün (bugün dahil, en az 1).</param>
+public sealed record CommitmentProgress(long TargetMinor, long AchievedMinor, int DaysLeft)
+{
+    /// <summary>Kapatılması gereken açık; taahhüt tutmuşsa 0.</summary>
+    public long GapMinor => Math.Max(0, TargetMinor - AchievedMinor);
+
+    /// <summary>
+    /// Açığı kalan günlere bölen aciliyet: "günde ne kadar geçmesi gerekiyor".
+    /// Sıralama bunu kullanır — 18 günde 120.000 ₺, 3 günde 60.000 ₺'den daha az aciledir.
+    /// </summary>
+    public double RequiredDailyMinor => (double)GapMinor / Math.Max(1, DaysLeft);
+}
+
 /// <param name="MedianLatencyMs">Ölçülen gecikme ortancası — bilinmiyorsa null.</param>
+/// <param name="Commitment">
+/// Hacim taahhüdü ilerlemesi — tanımlı değilse null. Taahhüt stratejisi bunu okur;
+/// diğer stratejiler görmezden gelir.
+/// </param>
 public sealed record RoutingCandidate(
     Guid AccountId,
     string Label,
     long? ExpectedCostMinor,
     double? AuthRate,
-    int? MedianLatencyMs);
+    int? MedianLatencyMs,
+    CommitmentProgress? Commitment = null);
 
 /// <summary>
 /// Sıralı adaylar + insan-okur gerekçe ("neden bu POS") + kararın dayandığı sinyaller.
@@ -125,4 +148,18 @@ public sealed record ConnectorPerformance(
 public interface IConnectorPerformanceSource
 {
     Task<IReadOnlyList<ConnectorPerformance>> GetAsync(TimeSpan window, CancellationToken ct);
+}
+
+/// <param name="VolumeMinor">Dönem başından beri hesaba giden TAHSİL EDİLMİŞ hacim.</param>
+public sealed record ConnectorVolume(Guid ConnectorAccountId, long VolumeMinor);
+
+/// <summary>
+/// Hacim taahhüdünün ilerleme sinyali: dönem içinde her hesaba gerçekte ne kadar iş
+/// gitti (Payments uygular — bağımlılık tersine, maliyet/performans portlarıyla aynı yön).
+/// Sayım TAHSİL EDİLMİŞ işlemler üzerinden yapılır: banka taahhüdü başarısız denemelerle
+/// değil, geçen ciroyla ölçer.
+/// </summary>
+public interface IVolumeProgressSource
+{
+    Task<IReadOnlyList<ConnectorVolume>> GetAsync(DateTimeOffset periodStart, CancellationToken ct);
 }

@@ -6,6 +6,7 @@ using Poyra.Modules.Connectors.Contracts;
 using Poyra.Modules.Routing.Contracts;
 using Poyra.Modules.Routing.Domain;
 using Poyra.Modules.Routing.Dsl;
+using Poyra.SharedKernel.Time;
 
 namespace Poyra.Modules.Routing.Infrastructure;
 
@@ -23,7 +24,9 @@ public sealed class RoutingEngine(
     RoutingDbContext db,
     IConnectorAccountsDirectory accounts,
     ICommissionRateSource rates,
-    IConnectorPerformanceSource performance) : IRoutingService
+    IConnectorPerformanceSource performance,
+    IVolumeProgressSource volumes,
+    IClock clock) : IRoutingService
 {
     /// <summary>Performans sinyalinin penceresi — TR'de POS davranışı gün içinde değişebilir.</summary>
     public static readonly TimeSpan PerformanceWindow = TimeSpan.FromDays(7);
@@ -156,10 +159,56 @@ public sealed class RoutingEngine(
         var performanceList = await performance.GetAsync(PerformanceWindow, ct);
         var performanceByAccount = performanceList.ToDictionary(p => p.ConnectorAccountId);
 
+        var commitmentByAccount = await BuildCommitmentsAsync(ct);
+
         return eligible
-            .Select(account => Enrich(account, facts.AmountMinor, rateByAccount, performanceByAccount))
+            .Select(account => Enrich(
+                account, facts.AmountMinor, rateByAccount, performanceByAccount, commitmentByAccount))
             .ToList();
     }
+
+    /// <summary>
+    /// Aktif taahhütleri, içinde bulunulan TR ayının gerçekleşen hacmiyle birleştirir.
+    /// Taahhüdü olmayan hesap sözlükte hiç yer almaz (null ilerleme) — "hedefi 0" ile
+    /// "hedefi yok" ayrı şeylerdir: ilki tutmuş bir taahhüt, ikincisi taahhütsüzlüktür.
+    /// </summary>
+    private async Task<Dictionary<Guid, CommitmentProgress>> BuildCommitmentsAsync(CancellationToken ct)
+    {
+        var commitments = await db.VolumeCommitments.AsNoTracking()
+            .Where(c => c.IsActive)
+            .ToListAsync(ct);
+
+        if (commitments.Count == 0)
+            return [];
+
+        var (periodStart, daysLeft) = MonthWindow(clock.UtcNow);
+        var achieved = (await volumes.GetAsync(periodStart, ct))
+            .ToDictionary(v => v.ConnectorAccountId, v => v.VolumeMinor);
+
+        return commitments.ToDictionary(
+            c => c.ConnectorAccountId,
+            c => new CommitmentProgress(
+                c.MonthlyTargetMinor, achieved.GetValueOrDefault(c.ConnectorAccountId), daysLeft));
+    }
+
+    /// <summary>
+    /// İçinde bulunulan TÜRKİYE ayının başlangıcı ve bitimine kalan gün (bugün dahil).
+    /// Banka taahhütleri takvim ayı üzerinden konuşulur; UTC ayı kullanılsaydı ayın ilk
+    /// ve son günlerinde üç saatlik kayma taahhüdü yanlış döneme yazardı.
+    ///
+    /// Dönüş UTC'ye çevrilir (aynı an, ofset 0): Npgsql <c>timestamptz</c> parametresine
+    /// yalnız UTC ofseti kabul eder, +03:00 taşıyan değer çalışma anında patlar.
+    /// </summary>
+    public static (DateTimeOffset PeriodStart, int DaysLeft) MonthWindow(DateTimeOffset utcNow)
+    {
+        var tr = utcNow.ToOffset(TurkeyOffset);
+        var start = new DateTimeOffset(tr.Year, tr.Month, 1, 0, 0, 0, TurkeyOffset);
+        var daysInMonth = DateTime.DaysInMonth(tr.Year, tr.Month);
+
+        return (start.ToUniversalTime(), daysInMonth - tr.Day + 1);
+    }
+
+    private static readonly TimeSpan TurkeyOffset = TimeSpan.FromHours(3);
 
     /// <summary>
     /// Tek hesabı sinyalleriyle adaya çevirir — motor ve simülatör AYNI zenginleştirmeden
@@ -168,7 +217,8 @@ public sealed class RoutingEngine(
     public static RoutingCandidate Enrich(
         ConnectorAccountSnapshot account, long amountMinor,
         IReadOnlyDictionary<Guid, int> rateBpsByAccount,
-        IReadOnlyDictionary<Guid, ConnectorPerformance> performanceByAccount)
+        IReadOnlyDictionary<Guid, ConnectorPerformance> performanceByAccount,
+        IReadOnlyDictionary<Guid, CommitmentProgress>? commitmentByAccount = null)
     {
         long? expectedCost = rateBpsByAccount.TryGetValue(account.Id, out var bps)
             ? (long)Math.Round(amountMinor * (bps / 10_000m), 0, MidpointRounding.ToEven)
@@ -182,7 +232,8 @@ public sealed class RoutingEngine(
             account.Label,
             expectedCost,
             reliable ? stats!.AuthRate : null,
-            reliable && stats!.MedianLatencyMs > 0 ? stats.MedianLatencyMs : null);
+            reliable && stats!.MedianLatencyMs > 0 ? stats.MedianLatencyMs : null,
+            commitmentByAccount?.GetValueOrDefault(account.Id));
     }
 
     private static string Normalize(string? strategy)
@@ -196,6 +247,7 @@ public sealed class RoutingEngine(
         RoutingStrategies.BestSuccess => "en yüksek başarı oranı",
         RoutingStrategies.Fastest => "en hızlı yanıt",
         RoutingStrategies.Balanced => "dengeli (maliyet + başarı + hız)",
+        RoutingStrategies.Commitment => "hacim taahhüdü",
         _ => "öncelik sırası",
     };
 
@@ -216,6 +268,10 @@ public sealed class RoutingEngine(
             RoutingStrategies.Fastest => winner.MedianLatencyMs is { } ms
                 ? $"{winner.Label} ortanca yanıt {ms} ms"
                 : $"{winner.Label} (ölçüm yok)",
+            RoutingStrategies.Commitment => winner.Commitment is { } commitment && commitment.GapMinor > 0
+                ? $"{winner.Label} — kalan {Kurus(commitment.GapMinor)} / {commitment.DaysLeft} gün "
+                  + $"(aylık hedef {Kurus(commitment.TargetMinor)})"
+                : $"{winner.Label} (açığı olan taahhüt yok — öncelik sırası)",
             RoutingStrategies.Balanced =>
                 $"{winner.Label} — komisyon {(winner.ExpectedCostMinor is { } c ? Kurus(c) : "?")}, "
                 + $"başarı {(winner.AuthRate is { } r ? $"%{r * 100:0.0}" : "?")}, "
