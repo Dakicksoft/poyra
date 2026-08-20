@@ -118,11 +118,23 @@ public sealed class RuleBuilderModel
     public List<string> Fallback { get; set; } = [];
     public bool SkipUnhealthy { get; set; } = true;
     public int MaxAttempts { get; set; } = 2;
+    public int ExplorePercent { get; set; } = 10;
     public double CostWeight { get; set; } = 1;
     public double SuccessWeight { get; set; } = 1;
     public double LatencyWeight { get; set; } = 0.5;
 
     public bool Advanced { get; private set; }
+
+    /// <summary>
+    /// Ölçüm kotası yalnız ÖLÇÜLEN sinyale dayanan stratejilerde iş görür; cheapest
+    /// (anlaşma oranı) ve priority (hesap önceliği) trafikten beslenmez. Alan da yalnız
+    /// o stratejiler seçiliyken gösterilir — dengeli ağırlıklar satırıyla aynı desen.
+    /// </summary>
+    public bool ShowExploreQuota
+        => MeasuredStrategies.Contains(Strategy)
+           || Rules.Any(r => r.Strategy is { } s && MeasuredStrategies.Contains(s));
+
+    private static readonly string[] MeasuredStrategies = ["best_success", "fastest", "balanced"];
 
     public static readonly IReadOnlyList<(string Value, string Label)> Strategies =
     [
@@ -150,6 +162,7 @@ public sealed class RuleBuilderModel
         model.Strategy = parsed.Strategy ?? "priority";
         model.SkipUnhealthy = parsed.Guards.SkipUnhealthy;
         model.MaxAttempts = parsed.Guards.MaxAttempts;
+        model.ExplorePercent = parsed.Guards.ExplorePercent;
         model.CostWeight = parsed.Weights.Cost;
         model.SuccessWeight = parsed.Weights.Success;
         model.LatencyWeight = parsed.Weights.Latency;
@@ -267,6 +280,7 @@ public sealed class RuleBuilderModel
         {
             ["skipUnhealthy"] = SkipUnhealthy,
             ["maxAttempts"] = MaxAttempts,
+            ["explorePercent"] = ExplorePercent,
         };
 
         if (Strategy == "balanced" || Rules.Any(r => r.Strategy == "balanced"))

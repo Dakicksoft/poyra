@@ -10,7 +10,7 @@
 [![Lisans: AGPL-3.0](https://img.shields.io/badge/Lisans-AGPL--3.0-blue.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-336791)](https://www.postgresql.org/)
-[![Testler](https://img.shields.io/badge/testler-1.111%20ge%C3%A7ti-brightgreen)](#testler)
+[![Testler](https://img.shields.io/badge/testler-1.147%20ge%C3%A7ti-brightgreen)](#testler)
 
 [Karşılaştırma](#alternatifler) · [Ekran görüntüleri](#ekran-görüntüleri) · [Özellikler](#özellikler) · [Konnektörler](#konnektörler) · [Mimari](#mimari) · [Akışlar](#akışlar) · [Kurulum](#hızlı-başlangıç-geliştirme-ortamı) · [Geliştirme](#geliştirme-rehberi) · [Yol haritası](#yol-haritası) · [Lisans](#lisans)
 
@@ -158,6 +158,7 @@ sayfasında alınır.
 **Orkestrasyon**
 - Kural DSL'i (all/any, kart sinyalleri: BIN, banka, on-us, program, tip) + stratejiler: `cheapest` · `best_success` · `fastest` · `balanced` · `priority`, hacim bölüşümü, fallback
 - Initiate aşamasında failover; canary sağlık yoklaması (bozuk POS rotadan otomatik düşer)
+- **Ölçüm kotası:** başarı/hız sinyaline dayanan stratejilerde trafiğin %10'u (ayarlanır) ölçümü olmayan POS'a ayrılır — yoksa kazanan POS tüm trafiği alır, ölçülemeyen POS penceresi boşalınca kalıcı olarak sona düşer ve banka toparlansa bile geri dönemez. Kova deterministiktir; kotaya düşen deneme başarısız olursa failover en iyi POS'u yakalar
 - Simülatör: aday kuralı geçmiş işlemlerde oynatır, POS değişimini ve komisyon tasarrufunu raporlar
 - Sürümlü kurallar + panelden iki aşamalı yayın + tek tık geri dönüş (rollback)
 
@@ -603,16 +604,16 @@ docker compose -f docker-compose.prod.yml up -d
 dotnet test                # hepsi, kapsam olmadan
 ```
 
-1.111 test, dört katman — hangi katmanın neyi kanıtladığı:
+1.147 test, dört katman — hangi katmanın neyi kanıtladığı:
 
-- **719 birim** — konnektör hash'leri, TOTP RFC 6238 vektörleri, taksit matematiği,
+- **747 birim** — konnektör hash'leri, TOTP RFC 6238 vektörleri, taksit matematiği,
   EMV QR, yeniden tahsilat politikası ve **konnektör uyum kiti** (her `IPaymentConnector`
   uygulamasının tutmak zorunda olduğu ortak sözleşme; konnektör listesi DI kaydından
   okunur, yeni banka eklendiğinde kendiliğinden kapsanır).
 - **37 mimari/PCI bekçisi** — modül sınırı, CVV sütunu yokluğu, düz PAN taraması.
-- **334 entegrasyon** — gerçek PG 18 + gerçek HTTP webhook alıcısı + panel/checkout
+- **341 entegrasyon** — gerçek PG 18 + gerçek HTTP webhook alıcısı + panel/checkout
   HTML doğrulaması + LISTEN/NOTIFY + arka plan işlerinin işyeri döngüsü.
-- **21 E2E** — gerçek tarayıcı (Playwright): interaktif adalar (canlı akış, rota
+- **22 E2E** — gerçek tarayıcı (Playwright): interaktif adalar (canlı akış, rota
   tasarımcısı), TOTP 2FA yolculuğu, tehlikeli aksiyon onayı, tek kullanımlık sır,
   375px mobil çekmece, yazdırma stilleri. Uygulamalar test sürecinde gerçek Kestrel
   portlarında ayağa kalkar — dışarıda ayakta duran servise bağımlılık yok.

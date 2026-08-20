@@ -64,6 +64,36 @@ public sealed class RoutingStrategyTests
         RoutingStrategies.Order(Adaylar, "saçma", new StrategyWeights())
             .Select(c => c.Label).ShouldBe(["Ucuz POS", "Hızlı POS", "Yeni POS"]);
     }
+
+    [Fact]
+    public void Yalniz_olculen_sinyale_dayanan_stratejiler_kotaya_girmeli()
+    {
+        // Trafikten beslenen sinyaller: başarı oranı ve gecikme
+        RoutingStrategies.UsesMeasuredSignals(RoutingStrategies.BestSuccess).ShouldBeTrue();
+        RoutingStrategies.UsesMeasuredSignals(RoutingStrategies.Fastest).ShouldBeTrue();
+        RoutingStrategies.UsesMeasuredSignals(RoutingStrategies.Balanced).ShouldBeTrue();
+
+        // cheapest yapılandırılmış anlaşma oranını, priority hesap önceliğini okur:
+        // trafik akmasa da değerleri bayatlamaz, kota harcamaları gereksiz olurdu
+        RoutingStrategies.UsesMeasuredSignals(RoutingStrategies.Cheapest).ShouldBeFalse();
+        RoutingStrategies.UsesMeasuredSignals(RoutingStrategies.Priority).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Sinyalsizlik_stratejinin_baktigi_boyuta_gore_belirlenmeli()
+    {
+        var yalnizHizi_olculmus = new RoutingCandidate(Guid.NewGuid(), "Yarım POS", 300, null, 250);
+
+        // best_success başarı oranına bakar — gecikmesi ölçülmüş olması onu ölçülmüş yapmaz
+        RoutingStrategies.IsUnmeasured(yalnizHizi_olculmus, RoutingStrategies.BestSuccess).ShouldBeTrue();
+        RoutingStrategies.IsUnmeasured(yalnizHizi_olculmus, RoutingStrategies.Fastest).ShouldBeFalse();
+
+        // balanced iki sinyali de kullanır: biri eksikse ölçülmeye muhtaçtır
+        RoutingStrategies.IsUnmeasured(yalnizHizi_olculmus, RoutingStrategies.Balanced).ShouldBeTrue();
+
+        RoutingStrategies.IsUnmeasured(Hizli, RoutingStrategies.Balanced).ShouldBeFalse();
+        RoutingStrategies.IsUnmeasured(Yeni, RoutingStrategies.BestSuccess).ShouldBeTrue();
+    }
 }
 
 public sealed class CardFactRuleTests

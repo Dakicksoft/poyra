@@ -106,6 +106,7 @@ public sealed class RuleBuilderModelTests
             Strategy = "balanced",
             MaxAttempts = 3,
             SkipUnhealthy = false,
+            ExplorePercent = 25,
             CostWeight = 2,
             LatencyWeight = 0.25,
             Fallback = ["Yedek POS"],
@@ -126,6 +127,7 @@ public sealed class RuleBuilderModelTests
         round.Strategy.ShouldBe("balanced");
         round.MaxAttempts.ShouldBe(3);
         round.SkipUnhealthy.ShouldBeFalse();
+        round.ExplorePercent.ShouldBe(25); // görsel kurucuda düzenlenen kural kotayı düşürmemeli
         round.CostWeight.ShouldBe(2);
         round.LatencyWeight.ShouldBe(0.25);
         round.Fallback.ShouldBe(["Yedek POS"]);

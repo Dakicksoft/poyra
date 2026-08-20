@@ -25,6 +25,21 @@
         </label>
     </div>
 
+    @if (Model.ShowExploreQuota)
+    {
+        <div class="builder-row">
+            <label class="inline-field">
+                Ölçüm kotası (%)
+                <input type="number" min="0" max="50" value="@Model.ExplorePercent"
+                       @onchange="e => Set(() => Model.ExplorePercent = ToInt(e, 10))" />
+            </label>
+            <span class="hint">
+                Trafiğin bu kadarlık kısmı, başarı/hız ölçümü olmayan POS'lara ayrılır —
+                yoksa kazanan POS tüm trafiği alır ve diğerleri bir daha ölçülemez. 0 = kapalı.
+            </span>
+        </div>
+    }
+
     @if (Model.Strategy == "balanced" || Model.Rules.Any(r => r.Strategy == "balanced"))
     {
         <div class="builder-row weights">

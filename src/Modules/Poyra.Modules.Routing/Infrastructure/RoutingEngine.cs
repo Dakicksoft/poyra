@@ -74,6 +74,11 @@ public sealed class RoutingEngine(
         string reason;
         var strategy = Normalize(document.Strategy);
 
+        // Sırayı strateji mi kurdu? Kural sabit rota verdiyse (elle sabitlenmiş yol) ya da
+        // hacim bölüşümü seçtiyse ölçüm kotası devreye GİRMEZ: ikisi de işyerinin açık
+        // talimatıdır, kota onları ezmemelidir.
+        var strategyOrdered = false;
+
         var matched = RuleEvaluator.FirstMatch(document, facts);
         if (matched is not null)
         {
@@ -88,7 +93,10 @@ public sealed class RoutingEngine(
 
             // Kural sabit rota vermişse sıra korunur; yalnız strateji verdiyse strateji sıralar
             if (routed.Count == 0 || matched.Strategy is not null)
+            {
                 primary = [.. RoutingStrategies.Order(primary, strategy, document.Weights)];
+                strategyOrdered = true;
+            }
 
             reason = $"Kural eşleşti: {matched.Reason ?? matched.Name ?? "adsız kural"}"
                      + (strategy == RoutingStrategies.Priority ? "" : $" — strateji: {Describe(strategy)}");
@@ -102,9 +110,22 @@ public sealed class RoutingEngine(
         else
         {
             primary = [.. RoutingStrategies.Order(candidates, strategy, document.Weights)];
+            strategyOrdered = true;
             reason = strategy == RoutingStrategies.Priority
                 ? "Öncelik sırası (aktif kural eşleşmedi)."
                 : $"Strateji: {Describe(strategy)} — {ExplainWinner(primary.FirstOrDefault(), strategy)}";
+        }
+
+        // Ölçüm kotası: kazanan tüm trafiği alırsa kaybeden örnek toplayamaz ve sinyali
+        // ölünce kalıcı olarak sona düşer. Kotaya düşen istek, ölçülmemiş bir adayı başa
+        // alır; kazanan hemen ARKASINDA kalır — deneme başarısız olursa failover onu yakalar,
+        // yani ölçüm bedava değil ama tahsilatı riske atmaz.
+        if (strategyOrdered && Explore(primary, strategy, document.Guards, facts.Seed)
+            is (var explored, var bucket, var quota))
+        {
+            primary = [explored, .. primary.Where(c => c.AccountId != explored.AccountId)];
+            reason = $"Ölçüm kotası: sinyali olmayan {explored.Label} öne alındı "
+                     + $"(kova %{bucket} < %{quota}; sıra stratejisi: {Describe(strategy)}).";
         }
 
         // Failover zinciri: birincil + fallback + kalan uygun hesaplar (tekilleştirilmiş)
@@ -226,12 +247,51 @@ public sealed class RoutingEngine(
             .Select(c => c!.AccountId)
             .ToList(); // bilinmeyen referanslar sessizce atlanır — hesap kapatılmış olabilir
 
+    /// <summary>
+    /// Ölçüm kotası. Sıranın BAŞINDAKİ aday zaten denenecek — kota yalnız arkada kalmış,
+    /// sinyalsiz adaylar için anlamlıdır. Kova hacim bölüşümünden AYRI tuzlanır: aynı
+    /// tohumda iki karar birbirine kilitlenmesin (aksi hâlde "%10 kotaya düşen istek"
+    /// ile "%10'luk bölüşüm kovası" hep aynı işlemler olurdu).
+    /// </summary>
+    private static (RoutingCandidate Candidate, int Bucket, int Quota)? Explore(
+        IReadOnlyList<RoutingCandidate> ordered, string strategy, RuleGuards guards, Guid seed)
+    {
+        if (!RoutingStrategies.UsesMeasuredSignals(strategy))
+            return null;
+
+        // Deneme hakkı tekse ölçümün arkasında failover YOKTUR: sinyalsiz bir POS'a
+        // yönlendirmek tahsilatı doğrudan kumara çevirirdi. Ölçüm ancak kurtarma varken
+        // göze alınabilir — kota sessizce kapanır.
+        if (guards.MaxAttempts < 2)
+            return null;
+
+        var quota = Math.Clamp(guards.ExplorePercent, 0, 50);
+        if (quota == 0 || ordered.Count < 2)
+            return null;
+
+        var pool = ordered.Skip(1).Where(c => RoutingStrategies.IsUnmeasured(c, strategy)).ToList();
+        if (pool.Count == 0)
+            return null; // ölçülmeye muhtaç aday yok — kota harcanmaz
+
+        var bucket = Bucket(seed, "explore:");
+        // Havuzda birden çok sinyalsiz aday varsa kova onları da deterministik olarak paylaştırır
+        return bucket < quota ? (pool[bucket % pool.Count], bucket, quota) : null;
+    }
+
+    /// <summary>
+    /// Tohumdan 0..99 deterministik kova — aynı intent her zaman aynı sonuca düşer
+    /// (tekrar oynatılabilir karar; simülatör ile motor aynı kovayı görür).
+    /// Tuz, aynı tohum üzerinden verilen farklı kararları birbirinden bağımsız kılar;
+    /// hacim bölüşümü tuzsuzdur — sözleşmesi altın değerlerle pinlenmiştir.
+    /// </summary>
+    private static int Bucket(Guid seed, string salt = "")
+        => (int)(BitConverter.ToUInt32(
+            SHA256.HashData(Encoding.UTF8.GetBytes(salt + seed.ToString("N"))), 0) % 100);
+
     private static (Guid Id, string Label, int Bucket)? PickBySplit(
         List<VolumeSplitEntry> split, Dictionary<string, RoutingCandidate> map, Guid seed)
     {
-        // Deterministik kova: aynı intent her zaman aynı hesaba düşer (tekrar oynatılabilir karar)
-        var bucket = (int)(BitConverter.ToUInt32(
-            SHA256.HashData(Encoding.UTF8.GetBytes(seed.ToString("N"))), 0) % 100);
+        var bucket = Bucket(seed);
 
         var cumulative = 0;
         foreach (var entry in split)
