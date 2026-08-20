@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Poyra.Api;
@@ -21,6 +22,8 @@ namespace Poyra.Tests.Integration;
 public sealed class PaymentLinkFlowTests : IDisposable
 {
     private const string AdminKey = "test-admin-key";
+
+    private readonly PostgresFixture _fixture;
     private const string Password = "link-parola-123";
 
     private readonly WebApplicationFactory<ApiEntryPoint> _apiFactory;
@@ -32,6 +35,8 @@ public sealed class PaymentLinkFlowTests : IDisposable
 
     public PaymentLinkFlowTests(PostgresFixture fixture)
     {
+        _fixture = fixture;
+
         void Configure(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
@@ -188,6 +193,15 @@ public sealed class PaymentLinkFlowTests : IDisposable
         page.ShouldContain("Güvenli ödemeye geç");
 
         var paymentId = await PayThroughCheckoutAsync(link.Slug);
+
+        // Panelden/API'den üretilen olağan bağlantı "link" kanalıdır — saha değil.
+        // (Saha ayrımı FieldSyncTests'te sınanır; ikisi de aynı checkout sayfasından geçer.)
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var intent = await db.PaymentIntents.AsNoTracking()
+                .SingleAsync(i => i.PublicId == paymentId);
+            intent.Channel.ShouldBe("link");
+        }
 
         // Sonuç sayfası durumu DEFTERDEN okur
         var result = await _checkout.GetStringAsync($"/l/{link.Slug}/sonuc?poyra_payment_id={paymentId}");

@@ -186,6 +186,80 @@ public sealed class CardFactRuleTests
     }
 
     [Fact]
+    public void Kanal_kurali_eslesmeli()
+    {
+        var doc = Doc("""
+            { "rules": [ { "name": "saha",
+                           "when": { "fact": "channel", "op": "eq", "value": "field" },
+                           "route": ["Saha POS"], "reason": "saha tahsilatı → Saha POS" } ] }
+            """);
+
+        RuleEvaluator.FirstMatch(doc, FactsWithChannel("field"))!.Name.ShouldBe("saha");
+        RuleEvaluator.FirstMatch(doc, FactsWithChannel("link")).ShouldBeNull();
+        RuleEvaluator.FirstMatch(doc, FactsWithChannel("api")).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Kanal_in_operatoruyle_birden_cok_deger_alabilmeli()
+    {
+        // "Müşteri ekranda değil" grubu: abonelik yenilemesi ve saha tahsilatı
+        var doc = Doc("""
+            { "rules": [ { "when": { "fact": "channel", "op": "in", "value": ["subscription","field"] },
+                           "strategy": "best_success" } ] }
+            """);
+
+        RuleEvaluator.FirstMatch(doc, FactsWithChannel("subscription")).ShouldNotBeNull();
+        RuleEvaluator.FirstMatch(doc, FactsWithChannel("field")).ShouldNotBeNull();
+        RuleEvaluator.FirstMatch(doc, FactsWithChannel("api")).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Kanal_bilinmiyorsa_kanal_kurallari_eslesmemeli()
+    {
+        // Kanal alanı eklenmeden önceki kayıtlar: null gelir. "api sayalım" deseydik,
+        // geçmişteki ödeme linkleri de api kuralına takılır ve simülatör yanlış raporlardı.
+        var doc = Doc("""
+            { "rules": [ { "when": { "fact": "channel", "op": "eq", "value": "api" }, "route": ["A"] } ] }
+            """);
+
+        RuleEvaluator.FirstMatch(doc, FactsWithChannel(null)).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Kanal_ve_kart_kosullari_birlikte_kullanilabilmeli()
+    {
+        var doc = Doc("""
+            { "rules": [ { "name": "abonelik-ticari",
+                "when": { "all": [
+                    { "fact": "channel", "op": "eq", "value": "subscription" },
+                    { "fact": "card.commercial", "op": "eq", "value": true } ] },
+                "route": ["Kurumsal POS"] } ] }
+            """);
+
+        var ticari = BonusKarti with { IsCommercial = true };
+
+        RuleEvaluator.FirstMatch(doc, Facts(ticari) with { Channel = "subscription" }).ShouldNotBeNull();
+        RuleEvaluator.FirstMatch(doc, Facts(ticari) with { Channel = "link" }).ShouldBeNull();
+        RuleEvaluator.FirstMatch(doc, Facts(BonusKarti) with { Channel = "subscription" }).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Bilinen_kanal_listesi_sozlesmeyi_korumali()
+    {
+        // Panel kataloğu, checkout eşlemesi ve kural DSL'i aynı dört değeri konuşur
+        PaymentChannels.IsKnown(PaymentChannels.Api).ShouldBeTrue();
+        PaymentChannels.IsKnown(PaymentChannels.Link).ShouldBeTrue();
+        PaymentChannels.IsKnown(PaymentChannels.Field).ShouldBeTrue();
+        PaymentChannels.IsKnown(PaymentChannels.Subscription).ShouldBeTrue();
+
+        PaymentChannels.IsKnown(null).ShouldBeFalse();
+        PaymentChannels.IsKnown("checkout").ShouldBeFalse(); // checkout kanal değil, linkin görüldüğü yer
+    }
+
+    private static RoutingFacts FactsWithChannel(string? channel)
+        => new(Guid.NewGuid(), 50_000, "TRY", 1, 14, Card: null, Channel: channel);
+
+    [Fact]
     public void Strateji_dokumanda_ve_kuralda_tanimlanabilmeli()
     {
         var doc = Doc("""

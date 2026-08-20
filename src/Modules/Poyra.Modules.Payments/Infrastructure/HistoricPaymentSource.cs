@@ -24,6 +24,7 @@ public sealed class HistoricPaymentSource(PaymentsDbContext db, IBinLookup bins)
                     intent.AmountMinor,
                     intent.Currency,
                     intent.Installments,
+                    intent.Channel,
                     intent.CreatedAt,
                     intent.RoutingResultJson,
                     attempt.ConnectorAccountId,
@@ -82,7 +83,8 @@ public sealed class HistoricPaymentSource(PaymentsDbContext db, IBinLookup bins)
             result.Add(new HistoricPayment(
                 row.PublicId, row.Id, row.AmountMinor, row.Currency, row.Installments,
                 row.AttemptedAt.ToOffset(TimeSpan.FromHours(3)).Hour, // TR saati
-                card, row.ConnectorAccountId, ActualCostMinor: null, row.CreatedAt, forced));
+                card, row.ConnectorAccountId, ActualCostMinor: null, row.CreatedAt, forced,
+                row.Channel));
         }
 
         return result;

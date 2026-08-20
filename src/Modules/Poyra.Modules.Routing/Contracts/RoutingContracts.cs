@@ -11,15 +11,48 @@ public sealed record CardFacts(
     string? CardType,
     bool IsCommercial);
 
+/// <summary>
+/// Ödemenin Poyra'ya hangi yoldan girdiği. Kanal tahsilat davranışını değiştirir —
+/// saha temsilcisinin müşterisi başka, gece koşan abonelik yenilemesi başka davranır —
+/// ama rota kararı bunu bugüne dek göremiyordu.
+/// Bu, işyerinin kendi sitesi/uygulaması ayrımı DEĞİLDİR: ikisi de aynı API'den girer ve
+/// Poyra'ya "api" görünür. Kanal, Poyra'nın kendi bildiği ve doğrulayabildiği şeydir.
+/// </summary>
+public static class PaymentChannels
+{
+    /// <summary>İşyeri sunucusu POST /v1/payments çağırdı.</summary>
+    public const string Api = "api";
+
+    /// <summary>Ödeme linki checkout sayfasında ödendi.</summary>
+    public const string Link = "link";
+
+    /// <summary>Saha temsilcisinin ürettiği bağlantı ödendi.</summary>
+    public const string Field = "field";
+
+    /// <summary>Abonelik yenilemesi / yeniden tahsilat — kart token'ıyla, müşteri ekranda değil.</summary>
+    public const string Subscription = "subscription";
+
+    public static bool IsKnown(string? channel)
+        => channel is Api or Link or Field or Subscription;
+}
+
 /// <param name="Seed">Deterministik hacim bölüşümü için tohum (intent id) — Math.Random yok.</param>
 /// <param name="HourLocal">Türkiye saati (UTC+3) — "mesai dışı" tarzı kurallar için.</param>
+/// <param name="Channel">
+/// Ödemenin geldiği kanal (bkz. <see cref="PaymentChannels"/>). null = BİLİNMİYOR:
+/// kanal alanı eklenmeden önce yazılmış kayıtlar böyledir ve kanal kuralları onlarda
+/// eşleşmez. Eski kayıtları "api sayalım" demek geçmişe uydurma kanal atfetmek olurdu —
+/// simülatör onları kanal kuralına yanlışlıkla sokar ve tasarruf tahminini bozardı.
+/// (Kart sinyalleriyle aynı duruş.)
+/// </param>
 public sealed record RoutingFacts(
     Guid Seed,
     long AmountMinor,
     string Currency,
     int Installments,
     int HourLocal,
-    CardFacts? Card = null);
+    CardFacts? Card = null,
+    string? Channel = null);
 
 /// <param name="AccountId">Aday hesap.</param>
 /// <param name="Label">Panelde/gerekçede okunur ad.</param>

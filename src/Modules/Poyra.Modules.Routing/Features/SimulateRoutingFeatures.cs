@@ -137,7 +137,7 @@ public sealed class SimulateRoutingHandler(
             // Ortak karar çekirdeği: kural → hacim bölüşümü → strateji — motor ne yaparsa o.
             // Seed gerçek intent id'si olduğundan bölüşüm kovası da motordakiyle birebir aynı düşer.
             var facts = new RoutingFacts(payment.Seed, payment.AmountMinor, payment.Currency,
-                payment.Installments, payment.HourLocal, payment.Card);
+                payment.Installments, payment.HourLocal, payment.Card, payment.Channel);
             var decision = RoutingEngine.DecideCore(candidateDocument, facts, candidates);
 
             // Confirm döngüsüyle aynı yürüyüş: zincirin ilk MaxAttempts adayından, yürütme-anı

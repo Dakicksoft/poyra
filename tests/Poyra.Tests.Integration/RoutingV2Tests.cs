@@ -522,4 +522,77 @@ public sealed class RoutingV2Tests : IDisposable
         intent.RoutingResultJson = json;
         await db.SaveChangesAsync();
     }
+
+    [Fact]
+    public async Task Kanal_kurali_api_odemesini_hedef_pos_a_yonlendirmeli()
+    {
+        var (tenant, _, pahali) = await SeedAsync();
+
+        // Kural: API'den gelen ödemeler öncelikli hatta, gerisi en ucuza.
+        // Strateji "cheapest" olduğu için kural olmasaydı Ucuz POS seçilirdi.
+        await ActivateRuleAsync(tenant.ApiKey, new
+        {
+            strategy = "cheapest",
+            rules = new[]
+            {
+                new
+                {
+                    name = "api-hatti",
+                    when = new { fact = "channel", op = "eq", value = "api" },
+                    route = new[] { "Pahalı POS" },
+                    reason = "API kanalı → öncelikli hat",
+                },
+            },
+        });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var intent = await db.PaymentIntents.AsNoTracking().SingleAsync(p => p.PublicId == payment.Id);
+            intent.Channel.ShouldBe("api");
+
+            var attempt = await db.PaymentAttempts.AsNoTracking().SingleAsync();
+            attempt.ConnectorAccountId.ShouldBe(pahali.Id); // kanal kuralı maliyeti ezdi
+        }
+
+        (await RoutingResultAsync(tenant.TenantId, payment.Id))
+            .GetProperty("reason").GetString().ShouldContain("API kanalı");
+    }
+
+    [Fact]
+    public async Task Isyeri_kanali_istek_govdesiyle_degistirememeli()
+    {
+        // Kanal, rota kuralının dayandığı bir sinyaldir; işyerinin beyanına bırakılsaydı
+        // "saha tahsilatı" kuralına API'den istek atarak girilebilirdi. Uç nokta kanalı
+        // kendisi yazar, gövdedeki alan bağlanmaz.
+        var (tenant, ucuz, _) = await SeedAsync();
+        await ActivateRuleAsync(tenant.ApiKey, new
+        {
+            strategy = "cheapest",
+            rules = new[]
+            {
+                new
+                {
+                    name = "saha-hatti",
+                    when = new { fact = "channel", op = "eq", value = "field" },
+                    route = new[] { "Pahalı POS" },
+                    reason = "saha → Pahalı POS",
+                },
+            },
+        });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true, channel = "field" },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
+        var intent = await db.PaymentIntents.AsNoTracking().SingleAsync(p => p.PublicId == payment.Id);
+        intent.Channel.ShouldBe("api"); // gövdedeki "field" yok sayıldı
+
+        var attempt = await db.PaymentAttempts.AsNoTracking().SingleAsync();
+        attempt.ConnectorAccountId.ShouldBe(ucuz.Id); // saha kuralı eşleşmedi → strateji
+    }
+
 }

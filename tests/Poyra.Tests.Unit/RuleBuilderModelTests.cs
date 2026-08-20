@@ -98,6 +98,49 @@ public sealed class RuleBuilderModelTests
         RuleEvaluator.FirstMatch(document, Facts(program: "maximum")).ShouldBeNull();
     }
 
+    /// <summary>
+    /// Görsel kurucunun fact kataloğu ile motorun tanıdığı fact'lerin BİREBİR aynı olması
+    /// bugüne dek yalnız bir yorumla korunuyordu. Katalogda olup motorda olmayan bir fact,
+    /// panelde seçilebilir ama hiçbir işlemde eşleşmeyen — yani sessizce ölü — kural üretir.
+    /// Test her katalog girdisini motorda sınar: bilinen bir fact'e "asla eşit olmayan değer"
+    /// sorulduğunda true döner; motor o fact'i hiç tanımıyorsa torbada yok sayılır ve false döner.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(KatalogFactleri))]
+    public void Katalogdaki_her_fact_motorda_tanimli_olmali(string fact, FactKind kind)
+    {
+        var absurd = kind switch
+        {
+            FactKind.Money or FactKind.Number => "-987654321",
+            FactKind.Boolean => "false", // dolu fact'te true kuruldu → ne:false eşleşir
+            _ => "\"___boyle_bir_deger_yok___\"",
+        };
+
+        var document = RuleDocument.Parse($$"""
+            { "rules": [ { "when": { "fact": "{{fact}}", "op": "ne", "value": {{absurd}} },
+                           "route": ["A"] } ] }
+            """);
+
+        RuleEvaluator.FirstMatch(document, TumSinyallerDolu())
+            .ShouldNotBeNull($"'{fact}' katalogda var ama motorun fact torbasında yok — " +
+                             "RuleEvaluator.ToFacts'e eklenmemiş.");
+    }
+
+    public static TheoryData<string, FactKind> KatalogFactleri()
+    {
+        var data = new TheoryData<string, FactKind>();
+        foreach (var definition in RuleFacts.All)
+            data.Add(definition.Fact, definition.Kind);
+
+        return data;
+    }
+
+    /// <summary>Her sinyali BİLİNEN bir işlem — katalog taramasının zemini.</summary>
+    private static RoutingFacts TumSinyallerDolu()
+        => new(Guid.NewGuid(), 150_000, "TRY", 6, 14,
+            new CardFacts("540061", "0062", "bonus", "mastercard", "credit", IsCommercial: true),
+            PaymentChannels.Api);
+
     [Fact]
     public void Bilesik_alanlar_json_ile_gidip_gelmeli()
     {

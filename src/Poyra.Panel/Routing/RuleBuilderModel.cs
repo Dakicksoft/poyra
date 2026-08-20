@@ -40,6 +40,11 @@ public static class RuleFacts
         new("hour", "Saat (TR, 0-23)", FactKind.Number, "Türkiye saati — gece toplu işler için"),
         new("currency", "Para birimi", FactKind.Choice, Choices:
             [("TRY", "TRY"), ("USD", "USD"), ("EUR", "EUR")]),
+        new("channel", "Kanal", FactKind.Choice,
+            "Ödemenin Poyra'ya girdiği yol — işyerinin kendi sitesi/uygulaması ayrımı değil",
+            Choices:
+            [("api", "API (işyeri sunucusu)"), ("link", "Ödeme linki"),
+             ("field", "Saha tahsilatı"), ("subscription", "Abonelik yenilemesi")]),
         new("bin", "Kart BIN'i", FactKind.Text, "İlk 6-8 hane (PAN değil)"),
         new("card.bank", "Kart bankası (kod)", FactKind.Text,
             "0062 Garanti · 0064 İş · 0067 Yapı Kredi · 0046 Akbank — kendi POS bankanızla eşitse 'on-us'",

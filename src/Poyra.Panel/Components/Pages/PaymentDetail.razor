@@ -70,6 +70,10 @@ else
         <div><span class="label">Mal bedeli</span> @Fmt.Money(_timeline.AmountMinor, _timeline.Currency)</div>
         <div><span class="label">Taksit</span> @(_timeline.Installments > 1 ? $"{_timeline.Installments}x" : "Tek çekim")</div>
         <div><span class="label">Oluşturma</span> @Fmt.Date(_timeline.CreatedAt)</div>
+        @if (Fmt.Channel(_timeline.Channel) is { Length: > 0 } channel)
+        {
+            <div><span class="label">Kanal</span> @channel</div>
+        }
         @if (_timeline.Description is { Length: > 0 } description)
         {
             <div><span class="label">Açıklama</span> @description</div>

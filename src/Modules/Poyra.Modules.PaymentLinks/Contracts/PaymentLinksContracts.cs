@@ -1,5 +1,20 @@
 namespace Poyra.Modules.PaymentLinks.Contracts;
 
+/// <summary>
+/// Bağlantıyı kimin ürettiği. Checkout ikisini de AYNI sayfadan sunar — ayrım yalnız
+/// burada saklanır ve ödemenin kanalına taşınır; aksi hâlde saha tahsilatı rota
+/// kararında normal ödeme linkinden ayırt edilemezdi.
+/// </summary>
+public static class PaymentLinkOrigins
+{
+    /// <summary>Panelden ya da API'den üretilen olağan ödeme linki.</summary>
+    public const string Link = "link";
+
+    /// <summary>Saha uygulamasının senkronunda üretilen tahsilat bağlantısı.</summary>
+    public const string Field = "field";
+}
+
+/// <param name="Origin">bkz. <see cref="PaymentLinkOrigins"/>.</param>
 public sealed record CheckoutLink(
     Guid TenantId,
     Guid LinkId,
@@ -9,7 +24,8 @@ public sealed record CheckoutLink(
     string Currency,
     string Description,
     int MaxInstallments,
-    string? UnavailableReason);
+    string? UnavailableReason,
+    string Origin = PaymentLinkOrigins.Link);
 
 public interface ICheckoutLinkResolver
 {

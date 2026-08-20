@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Poyra.Modules.PaymentLinks.Contracts;
 using Poyra.Modules.PaymentLinks.Domain;
 using Poyra.Persistence;
 using Poyra.SharedKernel.Tenancy;
@@ -41,6 +42,9 @@ internal sealed class PaymentLinkConfiguration : IEntityTypeConfiguration<Paymen
         b.HasIndex(x => x.Slug).IsUnique();
         b.Property(x => x.Currency).HasMaxLength(3).IsFixedLength();
         b.Property(x => x.Description).HasMaxLength(300);
+        // Varsayılan veritabanı düzeyinde de durur: alan eklenmeden önceki bağlantılar
+        // ve ham SQL ile açılan kayıtlar "link" olur — saha bağlantısı ancak açıkça yazılır.
+        b.Property(x => x.Origin).HasMaxLength(16).HasDefaultValue(PaymentLinkOrigins.Link);
         b.Property(x => x.Status)
             .HasConversion(s => PaymentLinkStatusMap.ToDb[s], s => PaymentLinkStatusMap.FromDb[s])
             .HasMaxLength(16);

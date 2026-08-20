@@ -32,6 +32,14 @@ public sealed class PaymentIntent : ITenantOwned, IAuditable
 
     public string? ReturnUrl { get; init; }
 
+    /// <summary>
+    /// Ödemenin doğduğu kanal (bkz. PaymentChannels: api · link · field · subscription).
+    /// Oluşturma anında bilinir ve bir daha değişmez — rota kuralları buna bakabilir.
+    /// Alan eklenmeden önceki kayıtlarda NULL kalır; geriye dönük "api" yazmak, gerçekte
+    /// ödeme linkinden gelmiş bir tahsilata uydurma kanal atfetmek olurdu.
+    /// </summary>
+    public string? Channel { get; init; }
+
     /// <summary>Rota kararı + gerekçesi (jsonb) — "neden bu POS" açıklanabilirliği.</summary>
     public string? RoutingResultJson { get; set; }
 
@@ -43,9 +51,10 @@ public sealed class PaymentIntent : ITenantOwned, IAuditable
     public static PaymentIntent Create(
         Guid tenantId, Guid? profileId, Money amount, string? description,
         int installments = 1, string? returnUrl = null,
-        string? customerRef = null, string? customerIp = null)
+        string? customerRef = null, string? customerIp = null, string? channel = null)
         => new()
         {
+            Channel = channel,
             TenantId = tenantId,
             ProfileId = profileId,
             AmountMinor = amount.AmountMinor,

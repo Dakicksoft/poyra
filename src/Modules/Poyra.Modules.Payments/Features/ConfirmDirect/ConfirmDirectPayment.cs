@@ -98,7 +98,7 @@ public sealed class ConfirmDirectPaymentHandler(
             ? new RoutingDecision([forced], "Elle seçilen bağlantı hesabı.", 1, null, null)
             : await routing.DecideAsync(new RoutingFacts(
                 intent.Id, intent.AmountMinor, intent.Currency, intent.Installments,
-                TurkeyHour(clock), cardFacts), ct);
+                TurkeyHour(clock), cardFacts, intent.Channel), ct);
 
         if (decision.AccountIds.Count == 0)
             throw new PoyraException(409, "routing.no_route", decision.Reason);

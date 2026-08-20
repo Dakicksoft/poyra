@@ -4,6 +4,7 @@ using Poyra.SharedKernel.Domain;
 using Poyra.Modules.Payments.Domain;
 using Poyra.Modules.Payments.Features.ConfirmPayment;
 using Poyra.Modules.Payments.Features.CreatePayment;
+using Poyra.Modules.Routing.Contracts;
 using Poyra.SharedKernel.Cqrs;
 using Poyra.SharedKernel.Errors;
 using Poyra.SharedKernel.Tenancy;
@@ -44,9 +45,17 @@ public static class CheckoutEndpoints
 
             try
             {
+                // Kaynak → kanal. Saha tahsilatı da checkout'tan ödenir ama rota için
+                // ayrı bir kanaldır; eşleme açık tutulur ki iki sözcük dağıtı ileride
+                // ayrışırsa (yeni bir kaynak eklenirse) burası sessizce yanlış yazmasın.
+                var channel = link.Origin == PaymentLinkOrigins.Field
+                    ? PaymentChannels.Field
+                    : PaymentChannels.Link;
+
                 var created = await dispatcher.Send(new CreatePaymentCommand(
                     amount, link.Currency, link.Description, installmentCount,
-                    ReturnUrl: $"{baseUrl.TrimEnd('/')}/l/{slug}/sonuc"));
+                    ReturnUrl: $"{baseUrl.TrimEnd('/')}/l/{slug}/sonuc",
+                    Channel: channel));
 
                 await links.RegisterAttemptAsync(
                     link.TenantId, link.LinkId, created.Id, amount, http.RequestAborted);

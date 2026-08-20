@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using FluentValidation;
 using Poyra.Modules.Payments.Domain;
 using Poyra.Modules.Payments.Features.ConfirmPayment;
+using Poyra.Modules.Routing.Contracts;
 using Poyra.SharedKernel.Cqrs;
 using Poyra.SharedKernel.Domain;
 using Poyra.SharedKernel.Tenancy;
@@ -20,9 +21,15 @@ public sealed record CreatePaymentRequest(
     string? CustomerRef = null,
     string? CustomerIp = null);
 
+/// <param name="Channel">
+/// Ödemenin Poyra'ya girdiği yol (bkz. PaymentChannels). İSTEK GÖVDESİNDEN ALINMAZ —
+/// çağıran uç noktanın kendisi bildirir: API ucu "api", checkout linkin kaynağını,
+/// abonelik faturalayıcısı "subscription" yazar. İşyerinin beyanına bırakılsaydı rota
+/// kuralı doğrulanamayan bir alana dayanırdı.
+/// </param>
 public sealed record CreatePaymentCommand(
     long AmountMinor, string Currency, string? Description, int Installments, string? ReturnUrl,
-    string? CustomerRef = null, string? CustomerIp = null)
+    string? CustomerRef = null, string? CustomerIp = null, string? Channel = null)
     : Poyra.SharedKernel.Cqrs.ICommand<PaymentResponse>;
 
 public sealed class CreatePaymentValidator : AbstractValidator<CreatePaymentCommand>
@@ -56,7 +63,8 @@ public sealed class CreatePaymentHandler(PaymentsDbContext db, TenantContext ten
             command.Installments,
             command.ReturnUrl,
             command.CustomerRef,
-            command.CustomerIp);
+            command.CustomerIp,
+            command.Channel);
 
         db.PaymentIntents.Add(intent);
         db.PaymentEvents.Add(PaymentEvent.For(intent, "payment.created", actor: "api",
@@ -87,7 +95,7 @@ public sealed class CreatePaymentEndpoint(IDispatcher dispatcher)
 
         var created = await dispatcher.Send(new CreatePaymentCommand(
             req.AmountMinor, req.Currency, req.Description, req.Installments, req.ReturnUrl,
-            req.CustomerRef, ip), ct);
+            req.CustomerRef, ip, PaymentChannels.Api), ct);
 
         var response = req.Confirm
             ? await dispatcher.Send(new ConfirmPaymentCommand(created.Id, null, req.Program), ct)

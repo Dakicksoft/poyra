@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Poyra.Modules.Field.Contracts;
+using Poyra.Modules.PaymentLinks.Contracts;
 using Poyra.Modules.PaymentLinks.Domain;
 using Poyra.Modules.PaymentLinks.Features;
 using Poyra.SharedKernel.Tenancy;
@@ -36,6 +37,7 @@ public sealed class FieldCheckoutLinks(
             MaxInstallments = 1,
             ExpiresAt = expiresAt ?? clock.UtcNow.Add(DefaultLifetime),
             MaxUsage = 1,
+            Origin = PaymentLinkOrigins.Field,
         };
 
         db.PaymentLinks.Add(link);
