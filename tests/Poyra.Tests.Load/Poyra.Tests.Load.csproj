@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Yük testi bilerek KONSOL uygulamasıdır, test projesi değil: `dotnet test` onu hiç
+    görmez ve CI'ın hızlı katmanına sızamaz. Yük profili dakikalar sürer; her PR'da
+    koşarsa CI'ı işe yaramaz hâle getirir.
+    Koşum: dotnet run &#45;&#45;project tests/Poyra.Tests.Load
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Kapsam toplayıcı gerekmez (test projesi değil); tests/Directory.Build.props'un
+         eklediği coverlet referansı burada anlamsız olurdu. -->
+    <ExcludeCoverletCollector>true</ExcludeCoverletCollector>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Poyra.Api\Poyra.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      WebApplicationFactory içerik kökünü "çözüm dizini + derleme adı" diye çözer, yani
+      <kök>/Poyra.Api arar; gerçek yer <kök>/src/Poyra.Api. Test projelerinde SDK bu
+      özniteliği kendisi üretir, konsol uygulamasında üretmez — elle veriyoruz.
+      (IsTestProject=true yapıp SDK'ya ürettirmek, projeyi `dotnet test` keşfine sokar;
+      yük profilinin CI'da kazara koşmaması bundan daha önemli.)
+    -->
+    <AssemblyAttribute Include="Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryContentRootAttribute">
+      <_Parameter1>Poyra.Api</_Parameter1>
+      <_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../src/Poyra.Api'))</_Parameter2>
+      <!-- Üçüncü parametre DOĞRULAMA işaretidir: bu dosya yolun altında yoksa öznitelik
+           sessizce yok sayılır ve çözüm-göreli tahmine geri dönülür. -->
+      <_Parameter3>Poyra.Api.csproj</_Parameter3>
+      <_Parameter4>0</_Parameter4>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Uygulama rolü betiği KOPYALANIR (E2E fikstürüyle aynı gerekçe): yük testi de
+         üretimdeki rol modeliyle koşsun, RLS maliyeti ölçüme dahil olsun. -->
+    <None Include="..\..\docker\initdb\01-app-role.sql" Link="01-app-role.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

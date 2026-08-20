@@ -34,7 +34,6 @@ internal sealed class RoutingRuleConfiguration : IEntityTypeConfiguration<Routin
         b.Property(x => x.Name).HasMaxLength(100);
         b.Property(x => x.Document).HasColumnType("jsonb");
         b.HasIndex(x => new { x.TenantId, x.Name, x.Version }).IsUnique();
-        // İşyeri başına en fazla bir aktif kural (partial unique index)
         b.HasIndex(x => new { x.TenantId, x.IsActive })
             .HasFilter("is_active = true")
             .IsUnique();
@@ -47,9 +46,6 @@ internal sealed class VolumeCommitmentConfiguration : IEntityTypeConfiguration<V
     {
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).ValueGeneratedNever();
-
-        // Hesap başına tek taahhüt: iki ayrı hedef hangisinin geçerli olduğunu belirsiz
-        // bırakır ve rota gerekçesi anlamını yitirir. Değişiklik güncellemedir.
         b.HasIndex(x => new { x.TenantId, x.ConnectorAccountId }).IsUnique();
 
         b.ToTable(t => t.HasCheckConstraint(

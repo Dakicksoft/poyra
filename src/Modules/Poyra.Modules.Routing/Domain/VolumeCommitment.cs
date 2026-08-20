@@ -25,10 +25,6 @@ public sealed class VolumeCommitment : ITenantOwned, IAuditable
     /// <summary>Aylık hedef ciro (kuruş).</summary>
     public long MonthlyTargetMinor { get; set; }
 
-    /// <summary>
-    /// Pasife çekilir, silinmez: taahhüt geçmişi rota kararlarının gerekçesidir —
-    /// "geçen ay neden hep Garanti'ye gitti?" sorusunun cevabı burada durur.
-    /// </summary>
     public bool IsActive { get; set; } = true;
 
     public DateTimeOffset CreatedAt { get; set; }

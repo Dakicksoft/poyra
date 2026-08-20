@@ -620,6 +620,37 @@ dotnet test                # hepsi, kapsam olmadan
   375px mobil çekmece, yazdırma stilleri. Uygulamalar test sürecinde gerçek Kestrel
   portlarında ayağa kalkar — dışarıda ayakta duran servise bağımlılık yok.
 
+### Yük profili
+
+Testlerin dördüncü katmanı doğruluğu kanıtlar; ölçek iddiası ayrı bir araca bırakıldı.
+`tests/Poyra.Tests.Load` bir **konsol uygulamasıdır** — `dotnet test` onu görmez, CI'ın
+normal akışına karışmaz, elle ya da [ayrı workflow](.github/workflows/yuk-profili.yml)
+ile koşar:
+
+```bash
+dotnet run --project tests/Poyra.Tests.Load -c Release -- --sure 30 --es 16
+```
+
+Hazır bir yük aracı yerine ~250 satır elle yazıldı: NBomber v6 kurumsal kullanımda ücretli
+aboneliğe bağlı ve paketi buraya eklemek, **Poyra'yı self-host eden her kuruma** aynı
+yükümlülüğü bindirirdi. k6 lisans açısından uygun ama yalnız HTTP konuşur — rota karar
+çekirdeğinin süreç içi ölçümü onunla yazılamazdı.
+
+Bir geliştirici dizüstünde (Docker'da ayarsız PG 18, MockBank, yük üreteci uygulamayla
+aynı süreçte), 10 sn · 16 eşzamanlı:
+
+| Senaryo | RPS | p50 | p99 | hata |
+|---|--:|--:|--:|--:|
+| `rota-karari` — karar çekirdeği, I/O yok | **318.000** | 2 µs | 4 µs | %0 |
+| `odeme-olustur` — yazma yolu (RLS + olay defteri) | **2.400** | 12 ms | 25 ms | %0 |
+| `odeme-confirm` — tam akış (rota + POS + deneme) | **272** | 48 ms | 218 ms | %0 |
+
+Okunuşu: **rota kararı darboğaz değil** — mikrosaniyelik bir iştir, ödeme başına bir kez
+koşar ve toplam maliyette görünmez. Tam akış bu donanımda ~16 eşzamanlıda doyuma ulaşır
+(günde ~23 milyon işlem); ötesinde gecikme büyür ama verim artmaz. Araç bunu kendisi
+raporlar — rakamların yanına ölçüm koşullarını da basar, çünkü koşulsuz bir yük rakamı
+pazarlama cümlesidir, mühendislik verisi değil.
+
 Kapsam: satır **%80,7** · dal **%54,3** · metot **%90**. CI iki aşamalıdır — önce
 Docker'sız hızlı katman (~1 dk), o yeşilse tam süit + kapsam kapısı. Kapı bir hedef değil
 **gerileme** kapısıdır: eşikler ölçülen değerin hemen altına kurulur, testsiz kod eklenince
