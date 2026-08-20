@@ -24,5 +24,6 @@ public sealed class PaymentsModule
             .AddScoped<Contracts.IRiskGate, PermissiveRiskGate>()
             .AddScoped<Contracts.IPaymentInitiator, PaymentInitiator>()
             .AddScoped<Routing.Contracts.IConnectorPerformanceSource, ConnectorPerformanceSource>()
-            .AddScoped<Routing.Contracts.IHistoricPaymentSource, HistoricPaymentSource>();
+            .AddScoped<Routing.Contracts.IHistoricPaymentSource, HistoricPaymentSource>()
+            .AddScoped<Routing.Contracts.IExecutionFeasibilitySource, ExecutionFeasibilitySource>();
 }

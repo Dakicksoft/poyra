@@ -111,6 +111,8 @@ public sealed class ConfirmDirectPaymentHandler(
             strategy = decision.Strategy,
             candidates = decision.AccountIds,
             flow = command.UseThreeDs ? "direct_3ds" : "direct",
+            forced = command.ForceConnectorAccountId is not null, // elle sabitlendi — kural devrede değildi
+            card = DecisionCardJson.From(cardFacts), // karar anındaki kart — simülatör replay'i için
             signals = decision.Candidates?.Select(c => new
             {
                 account = c.Label,

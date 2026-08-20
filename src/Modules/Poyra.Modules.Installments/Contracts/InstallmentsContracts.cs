@@ -5,6 +5,11 @@ public sealed record InstallmentPrice(long ChargedAmountMinor, int RateBps, stri
 
 public interface IInstallmentPricing
 {
+    /// <summary>
+    /// SÖZLEŞME: dönüşün null'luğu (şema var/yok) tutardan BAĞIMSIZDIR — tutar yalnız müşteri
+    /// toplamını etkiler. ExecutionFeasibilitySource kukla tutarla çağırarak buna dayanır;
+    /// şemaya tutar limiti eklenecekse önce o bağımlılık çözülmelidir.
+    /// </summary>
     Task<InstallmentPrice?> PriceAsync(
         Guid connectorAccountId, int installments, long amountMinor, string? program, CancellationToken ct);
 }

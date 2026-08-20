@@ -158,6 +158,22 @@ else
             <span class="value">@sim.CostUnknownCount</span>
             <span class="sub">anlaşma tanımsız</span>
         </div>
+        @if (sim.UnroutableCount > 0)
+        {
+            <div class="tile warn">
+                <span class="label">Yönlendirilemez</span>
+                <span class="value">@sim.UnroutableCount</span>
+                <span class="sub">aday kural yol bulamazdı</span>
+            </div>
+        }
+        @if (sim.ForcedCount > 0)
+        {
+            <div class="tile">
+                <span class="label">Elle sabitlenmiş</span>
+                <span class="value">@sim.ForcedCount</span>
+                <span class="sub">kural bunları değiştiremez</span>
+            </div>
+        }
     </div>
 
     @if (sim.Changes.Count > 0)

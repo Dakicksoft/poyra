@@ -72,6 +72,9 @@ public sealed class ConfirmPaymentHandler(
             rule_version = decision.RuleVersion,
             strategy = decision.Strategy,
             candidates = decision.AccountIds,
+            flow = "hosted",
+            forced = command.ForceConnectorAccountId is not null, // elle sabitlendi — kural devrede değildi
+            card = DecisionCardJson.From(cardFacts), // karar anındaki kart — simülatör replay'i için
             signals = decision.Candidates?.Select(c => new
             {
                 account = c.Label,
@@ -186,7 +189,14 @@ public sealed class ConfirmPaymentHandler(
 
     private async Task<CardFacts?> CardFactsAsync(string? bin, string? program, CancellationToken ct)
     {
-        if (bin is { Length: >= 6 } && await bins.FindAsync(bin, ct) is { } info)
+        // Tarayıcı kontrolündeki ham girdi: yalnız 6+ haneli rakam dizisi BIN sayılır ve ilk
+        // 8 hanede kesilir — bin alanına yanlışlıkla/kötü niyetle basılan tam PAN ne kural
+        // fact'lerine ne kayıtlara sızar (kalıcılaştıran taraf ayrıca 6 haneye kırpar).
+        bin = bin is { Length: >= 6 } && bin.All(char.IsAsciiDigit)
+            ? bin[..Math.Min(8, bin.Length)]
+            : null;
+
+        if (bin is not null && await bins.FindAsync(bin, ct) is { } info)
             return new CardFacts(info.Bin, info.BankCode, info.Program, info.Brand,
                 info.CardType, info.IsCommercial);
 

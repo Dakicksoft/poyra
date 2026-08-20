@@ -51,7 +51,8 @@ public sealed class RoutingV2Tests : IDisposable
         long? FromCostMinor, long? ToCostMinor, long? SavingMinor, string Reason);
     private sealed record SimulationResult(
         int SampleSize, int ChangedCount, long CurrentCostMinor, long SimulatedCostMinor,
-        long EstimatedSavingMinor, int CostUnknownCount, List<SimulationChange> Changes);
+        long EstimatedSavingMinor, int CostUnknownCount, int UnroutableCount, int ForcedCount,
+        List<SimulationChange> Changes);
 
     private Task<HttpResponseMessage> Send(HttpMethod method, string path, object? body,
         params (string Name, string Value)[] headers)
@@ -245,5 +246,280 @@ public sealed class RoutingV2Tests : IDisposable
         await using var check = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
         (await check.PaymentAttempts.AsNoTracking().CountAsync(a => a.ConnectorAccountId == ucuz.Id))
             .ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Hacim_bolusumu_kovasi_oncelige_ragmen_uygulanmali()
+    {
+        var (tenant, ucuz, _) = await SeedAsync();
+        // %100 tek kovaya: tohum ne olursa olsun bölüşüm Ucuz POS'u seçmeli
+        await ActivateRuleAsync(tenant.ApiKey, new
+        {
+            volumeSplit = new[] { new { account = "Ucuz POS", percent = 100 } },
+        });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+        payment.Status.ShouldBe("requires_action");
+
+        // Öncelikte "Pahalı" önde olmasına rağmen bölüşüm kovası ucuzu seçmeli
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var attempt = await db.PaymentAttempts.AsNoTracking().SingleAsync();
+            attempt.ConnectorAccountId.ShouldBe(ucuz.Id);
+        }
+
+        var routing = await RoutingResultAsync(tenant.TenantId, payment.Id);
+        routing.GetProperty("reason").GetString().ShouldContain("Hacim bölüşümü");
+    }
+
+    [Fact]
+    public async Task Simulator_hacim_bolusumunu_motorla_ayni_uygulamali()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+        // Varsayılan öncelik: Pahalı POS önde → gerçek işlemler oraya gitsin
+        for (var i = 0; i < 2; i++)
+        {
+            var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+                new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+            await _client.PostAsync(payment.NextAction!.Url,
+                new FormUrlEncodedContent(payment.NextAction.Fields));
+        }
+
+        // Aday kural: hacmin %100'ü Ucuz POS kovasına → iki işlem de kaymalı.
+        // (Eski simülatör bölüşümü yok sayıp 0 değişim raporlardı — motor-simülatör tutarsızlığı.)
+        var simulation = await SendOk<SimulationResult>(HttpMethod.Post, "/v1/routing/simulate",
+            new
+            {
+                document = new { volumeSplit = new[] { new { account = "Ucuz POS", percent = 100 } } },
+                days = 1,
+                limit = 100,
+            },
+            ("X-Api-Key", tenant.ApiKey));
+
+        simulation.SampleSize.ShouldBe(2);
+        simulation.ChangedCount.ShouldBe(2);
+        simulation.Changes.ShouldAllBe(c => c.ToAccount == "Ucuz POS");
+        simulation.Changes[0].Reason.ShouldContain("Hacim bölüşümü");
+        simulation.EstimatedSavingMinor.ShouldBe(2_800); // 2 × 100.000 × (%3,20 − %1,80)
+    }
+
+    [Fact]
+    public async Task Simulator_bolusum_kovasinda_motorla_ayni_hesaba_dusmeli()
+    {
+        var (tenant, _, _) = await SeedAsync();
+        var document = new
+        {
+            volumeSplit = new[]
+            {
+                new { account = "Ucuz POS", percent = 50 },
+                new { account = "Pahalı POS", percent = 50 },
+            },
+        };
+        await ActivateRuleAsync(tenant.ApiKey, document);
+
+        // 8 gerçek ödeme: her biri kendi intent tohumuyla bir kovaya düşer
+        for (var i = 0; i < 8; i++)
+        {
+            var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+                new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+            await _client.PostAsync(payment.NextAction!.Url,
+                new FormUrlEncodedContent(payment.NextAction.Fields));
+        }
+
+        // AYNI doküman simüle edilince hiçbir işlem yer değiştirmemeli: simülatör motorla aynı
+        // tohumdan (intent id) aynı kovayı bulur. Tohumlar ayrışsaydı ~yarısı "değişti" çıkardı.
+        var simulation = await SendOk<SimulationResult>(HttpMethod.Post, "/v1/routing/simulate",
+            new { document, days = 1, limit = 100 }, ("X-Api-Key", tenant.ApiKey));
+
+        simulation.SampleSize.ShouldBe(8);
+        simulation.ChangedCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Simulator_karar_aninda_bilinmeyen_karti_sonradan_ogrenmemeli()
+    {
+        var (tenant, _, _) = await SeedAsync();
+
+        // 1. ödeme: bin İPUCUSUZ confirm — motor kararı kartsız verir; kart (540667…)
+        // ancak banka callback'inde öğrenilir ve MaskedPan'a yazılır
+        var bilinmeyen = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+        (await _client.PostAsync(bilinmeyen.NextAction!.Url,
+            new FormUrlEncodedContent(bilinmeyen.NextAction.Fields))).IsSuccessStatusCode.ShouldBeTrue();
+
+        // 2. ödeme: AYNI bin confirm'de verilir — motor kararı kartla verir
+        var bilinen = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY" }, ("X-Api-Key", tenant.ApiKey));
+        var confirmed = await SendOk<PaymentDto>(HttpMethod.Post, $"/v1/payments/{bilinen.Id}/confirm",
+            new { bin = "540667" }, ("X-Api-Key", tenant.ApiKey));
+        (await _client.PostAsync(confirmed.NextAction!.Url,
+            new FormUrlEncodedContent(confirmed.NextAction.Fields))).IsSuccessStatusCode.ShouldBeTrue();
+
+        // Testin öncülü: 1. ödemenin MaskedPan'ı callback'te gerçekten kaydedildi ve kural
+        // önekiyle (5406) eşleşiyor — eski simülatör tam bu yüzden onu da kaydırırdı
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var intent = await db.PaymentIntents.AsNoTracking()
+                .SingleAsync(p => p.PublicId == bilinmeyen.Id);
+            var attempt = await db.PaymentAttempts.AsNoTracking()
+                .SingleAsync(a => a.PaymentIntentId == intent.Id);
+            attempt.MaskedPan.ShouldNotBeNull();
+            attempt.MaskedPan.ShouldStartWith("540667");
+        }
+
+        // Aday kural: 5406… kartları Ucuz POS'a. Karar anında kartı BİLİNEN ödeme kayar;
+        // bilinmeyen ödeme kaymaz — MaskedPan'dan sonradan öğrenilen kart kurallara sızmamalı.
+        var simulation = await SendOk<SimulationResult>(HttpMethod.Post, "/v1/routing/simulate",
+            new
+            {
+                document = new
+                {
+                    rules = new[]
+                    {
+                        new
+                        {
+                            name = "5406-kampanya",
+                            when = new { fact = "bin", op = "starts_with", value = "5406" },
+                            route = new[] { "Ucuz POS" },
+                        },
+                    },
+                },
+                days = 1,
+                limit = 100,
+            },
+            ("X-Api-Key", tenant.ApiKey));
+
+        simulation.SampleSize.ShouldBe(2);
+        simulation.ChangedCount.ShouldBe(1); // eski simülatör her ikisini de kaydırırdı
+        simulation.Changes.Single().PaymentId.ShouldBe(bilinen.Id);
+        simulation.Changes.Single().ToAccount.ShouldBe("Ucuz POS");
+    }
+
+    [Fact]
+    public async Task Simulator_taksit_semasi_olmayan_pos_a_kaydirmamali()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        // 3 taksit komisyon anlaşmaları: maliyet sinyalinde Ucuz yine ucuz
+        await SendOk<object>(HttpMethod.Post, "/v1/recon/agreements",
+            new { connectorAccountId = pahali.Id, installmentCount = 3, rateBps = 320, valorDays = 1 },
+            ("X-Api-Key", tenant.ApiKey));
+        await SendOk<object>(HttpMethod.Post, "/v1/recon/agreements",
+            new { connectorAccountId = ucuz.Id, installmentCount = 3, rateBps = 180, valorDays = 1 },
+            ("X-Api-Key", tenant.ApiKey));
+
+        // Taksit şeması YALNIZ Pahalı'da — Ucuz 3 taksidi gerçekte işleyemez
+        await SendOk<object>(HttpMethod.Post, "/v1/installments/schemes",
+            new { connectorAccountId = pahali.Id, program = "*", installmentCount = 3, customerRateBps = 0 },
+            ("X-Api-Key", tenant.ApiKey));
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", installments = 3, confirm = true },
+            ("X-Api-Key", tenant.ApiKey));
+        await _client.PostAsync(payment.NextAction!.Url,
+            new FormUrlEncodedContent(payment.NextAction.Fields));
+
+        // "En ucuz" aday kuralın zincir başı Ucuz'dur ama şeması yok: confirm döngüsü gibi
+        // simülatör de Pahalı'ya düşmeli — POS değişimi ve sahte tasarruf raporlanmamalı
+        var simulation = await SendOk<SimulationResult>(HttpMethod.Post, "/v1/routing/simulate",
+            new { document = new { strategy = "cheapest" }, days = 1, limit = 100 },
+            ("X-Api-Key", tenant.ApiKey));
+
+        simulation.SampleSize.ShouldBe(1);
+        simulation.ChangedCount.ShouldBe(0); // eski simülatör "Ucuz'a kayar, 1.400 kuruş tasarruf" derdi
+        simulation.UnroutableCount.ShouldBe(0);
+        simulation.EstimatedSavingMinor.ShouldBe(0);
+
+        // maxAttempts=1: confirm yalnız zincir başını denerdi — işlem yönlendirilemez sayılmalı.
+        // DİKKAT: bu blok üstteki bloğun da kanıtıdır — UnroutableCount=1 ancak zincir başı
+        // gerçekten Ucuz (ve şemasız) ise çıkar; silinirse üstteki assert'ler dişsiz kalır.
+        var darZincir = await SendOk<SimulationResult>(HttpMethod.Post, "/v1/routing/simulate",
+            new
+            {
+                document = new { strategy = "cheapest", guards = new { maxAttempts = 1 } },
+                days = 1,
+                limit = 100,
+            },
+            ("X-Api-Key", tenant.ApiKey));
+
+        darZincir.UnroutableCount.ShouldBe(1);
+        darZincir.ChangedCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Simulator_eski_kayitta_maskedpan_yaklasiklamasina_dusmeli()
+    {
+        var (tenant, _, _) = await SeedAsync();
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+        (await _client.PostAsync(payment.NextAction!.Url,
+            new FormUrlEncodedContent(payment.NextAction.Fields))).IsSuccessStatusCode.ShouldBeTrue();
+
+        object binRule = new
+        {
+            document = new
+            {
+                rules = new[]
+                {
+                    new
+                    {
+                        name = "5406-kampanya",
+                        when = new { fact = "bin", op = "starts_with", value = "5406" },
+                        route = new[] { "Ucuz POS" },
+                    },
+                },
+            },
+            days = 1,
+            limit = 100,
+        };
+
+        // Kaydı ESKİ biçime çevir: "card" anahtarı yok → simülatör MaskedPan yaklaşıklamasına
+        // düşmeli ve kural (540667… önekiyle) eşleşmeli. Deploy sonrası pencere dolana kadar
+        // üretim trafiğinin çoğu bu daldan geçecek.
+        await RewriteRoutingResultAsync(tenant.TenantId, payment.Id, "{}");
+        var eski = await SendOk<SimulationResult>(
+            HttpMethod.Post, "/v1/routing/simulate", binRule, ("X-Api-Key", tenant.ApiKey));
+        eski.ChangedCount.ShouldBe(1);
+        eski.Changes.Single().ToAccount.ShouldBe("Ucuz POS");
+
+        // Nesne olmayan kök ("[]" jsonb'de geçerlidir): 500 yerine yine fallback çalışmalı
+        await RewriteRoutingResultAsync(tenant.TenantId, payment.Id, "[]");
+        var bozuk = await SendOk<SimulationResult>(
+            HttpMethod.Post, "/v1/routing/simulate", binRule, ("X-Api-Key", tenant.ApiKey));
+        bozuk.ChangedCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Simulator_elle_sabitlenen_odemeyi_kural_kaydirmis_gibi_gostermemeli()
+    {
+        var (tenant, _, pahali) = await SeedAsync();
+
+        // İşyeri hesabı ELLE seçiyor — kural devrede değil ve kural değişse de zorlama sürer
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY" }, ("X-Api-Key", tenant.ApiKey));
+        var confirmed = await SendOk<PaymentDto>(HttpMethod.Post, $"/v1/payments/{payment.Id}/confirm",
+            new { connectorAccountId = pahali.Id }, ("X-Api-Key", tenant.ApiKey));
+        (await _client.PostAsync(confirmed.NextAction!.Url,
+            new FormUrlEncodedContent(confirmed.NextAction.Fields))).IsSuccessStatusCode.ShouldBeTrue();
+
+        // "En ucuz" aday kural bu ödemeyi Ucuz'a kaydırırmış gibi tasarruf raporlamamalı
+        var simulation = await SendOk<SimulationResult>(HttpMethod.Post, "/v1/routing/simulate",
+            new { document = new { strategy = "cheapest" }, days = 1, limit = 100 },
+            ("X-Api-Key", tenant.ApiKey));
+
+        simulation.SampleSize.ShouldBe(1);
+        simulation.ForcedCount.ShouldBe(1);
+        simulation.ChangedCount.ShouldBe(0);
+        simulation.EstimatedSavingMinor.ShouldBe(0);
+    }
+
+    private async Task RewriteRoutingResultAsync(Guid tenantId, string paymentId, string json)
+    {
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenantId));
+        var intent = await db.PaymentIntents.SingleAsync(p => p.PublicId == paymentId);
+        intent.RoutingResultJson = json;
+        await db.SaveChangesAsync();
     }
 }
