@@ -50,19 +50,20 @@ bankadan para geri gelene kadar takip eder.
 
 ### Alternatifler
 
-| | Poyra | Craftgate | Treps | Paywall | Tahsildar | Payten PG | iyzico · PayTR · Param | Netahsilat (Finrota) | mews/pos |
+
+| | Poyra | Craftgate | Tapsilat | Paywall | Tahsildar | Payten PG | iyzico · PayTR · Param | Netahsilat (Finrota) | mews/pos |
 |---|---|---|---|---|---|---|---|---|---|
-| Model | Açık kaynak orkestrasyon + **ödeme muhasebesi** | SaaS orkestrasyon | SaaS orkestrasyon + finansal operasyon | SaaS orkestrasyon | SaaS orkestrasyon | SaaS orkestrasyon + gateway (MSU/Paratika) | Ödeme kuruluşu (tek sözleşme) | SaaS e-tahsilat | PHP entegrasyon kütüphanesi |
-| Açık kaynak · self-host | ✅ AGPL-3.0, Docker ile kendi sunucunda | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ MIT — kütüphane, platform değil |
-| Çoklu POS yönlendirme + failover | ✅ kural DSL + stratejiler | ✅ | ✅ | ✅ en düşük maliyetli rota | ✅ en düşük komisyona yönlendirme | ✅ Smart Switch | ❌ tek sağlayıcı | kısmen — çoklu sanal POS tek panelde | ❌ elle yazarsınız |
-| Açıklanabilir yönlendirme (simülatör, "neden bu POS?") | ✅ | — | — | — | — | — | — | — | ❌ |
-| Üç yönlü mutabakat (defter ↔ POS ekstresi ↔ banka MT940) | ✅ | — | kısmen — mutabakat modülü | — | — | kısmen — otomatik mutabakat/raporlama | — | kısmen — Posrapor POS raporlama | ❌ |
-| Komisyon denetimi + itiraz takibi | ✅ kuruş toleranssız, "Bankaya İtiraz Raporu" | — | — | — | — | — | — | — | ❌ |
-| Valör kaybını liraya çevirme | ✅ | — | — | — | — | — | — | — | ❌ |
+| Model | Açık kaynak orkestrasyon + **ödeme muhasebesi** | SaaS orkestrasyon | SaaS orkestrasyon + finansal operasyon + mutabakat | SaaS orkestrasyon | SaaS orkestrasyon | SaaS orkestrasyon + gateway (MSU/Paratika) | Ödeme kuruluşu (tek sözleşme) | SaaS e-tahsilat | PHP entegrasyon kütüphanesi |
+| Açık kaynak · self-host | ✅ AGPL-3.0, Docker ile kendi sunucunda | ❌ | ❌ / on-prem kuruluş | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ MIT — kütüphane, platform değil |
+| Çoklu POS yönlendirme + failover | ✅ kural DSL + stratejiler | ✅ | ✅ Smart Switch + Kural Motoru | ✅ en düşük maliyetli rota | ✅ en düşük komisyona yönlendirme | ✅ Smart Switch | ❌ tek sağlayıcı | kısmen — çoklu sanal POS tek panelde | ❌ elle yazarsınız |
+| Açıklanabilir yönlendirme (simülatör, "neden bu POS?") | ✅ | — | ✅ | — | — | — | — | — | ❌ |
+| Üç yönlü mutabakat (defter ↔ POS ekstresi ↔ banka MT940) | ✅ | — | ✅ | — | — | kısmen — otomatik mutabakat/raporlama | — | kısmen — Posrapor POS raporlama | ❌ |
+| Komisyon denetimi + itiraz takibi | ✅ kuruş toleranssız, "Bankaya İtiraz Raporu" | — | ✅ | — | — | — | — | — | ❌ |
+| Valör kaybını liraya çevirme | ✅ | — | ✅ | — | — | — | — | — | ❌ |
 | Taksit + vade farkı motoru | ✅ bankacı yuvarlaması | ✅ | ✅ | ✅ | ✅ 1–12 taksit | ✅ | ✅ | ✅ | kısmen — taksit parametresi |
-| Abonelik + yeniden tahsilat | ✅ maaş takvimli akıllı yeniden tahsilat | ✅ | — | ✅ tekrarlı ödeme + kart saklama | — | ✅ tokenizasyon + tekrarlayan ödeme | ✅ (iyzico) | kısmen — borç bildirimi (e-posta/SMS) | kısmen — recurring |
-| Saha tahsilatı (çevrimdışı mobil) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | kısmen — SMS/link ile çevrimiçi | ❌ |
-| Ücretlendirme | Self-host ücretsiz | SaaS | SaaS | SaaS | SaaS — %2,99'dan başlayan komisyon | SaaS | işlem komisyonu | SaaS | ücretsiz |
+| Abonelik + yeniden tahsilat | ✅ maaş takvimli akıllı yeniden tahsilat | ✅ | ✅ | ✅ tekrarlı ödeme + kart saklama | — | ✅ tokenizasyon + tekrarlayan ödeme | ✅ (iyzico) | kısmen — borç bildirimi (e-posta/SMS) | kısmen — recurring |
+| Saha tahsilatı (çevrimdışı mobil) | ✅ | ❌ | kısmen — SMS/link ile çevrimiçi | ❌ | ❌ | ❌ | ❌ | kısmen — SMS/link ile çevrimiçi | ❌ |
+| Ücretlendirme | Self-host ücretsiz | SaaS | SaaS + on-prem | SaaS | SaaS — %2,99'dan başlayan komisyon | SaaS | işlem komisyonu | SaaS | ücretsiz |
 
 ## Ekran görüntüleri
 
