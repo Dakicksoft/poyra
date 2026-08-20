@@ -178,6 +178,10 @@ public sealed class PanelFlowTests : IDisposable
         detail.ShouldContain("Öncelik sırası"); // rota kararının gerekçesi
         detail.ShouldContain("payment.succeeded"); // olay defteri
         detail.ShouldContain("Zaman çizelgesi");
+
+        // Kanal işyerine de görünür: API'den gelen ödeme "API" diye etiketlenir.
+        // (Kanalsız eski kayıtlarda satır hiç basılmaz — uydurulmuş kanal gösterilmez.)
+        detail.ShouldContain("Kanal");
     }
 
     [Fact]

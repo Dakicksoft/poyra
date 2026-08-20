@@ -60,7 +60,7 @@ public sealed class ConfirmPaymentHandler(
             ? new RoutingDecision([forced], "Elle seçilen bağlantı hesabı.", 1, null, null)
             : await routing.DecideAsync(new RoutingFacts(
                 intent.Id, intent.AmountMinor, intent.Currency, intent.Installments,
-                TurkeyHour(clock), cardFacts), ct);
+                TurkeyHour(clock), cardFacts, intent.Channel), ct);
 
         if (decision.AccountIds.Count == 0)
             throw new PoyraException(409, "routing.no_route", decision.Reason);
@@ -198,7 +198,7 @@ public sealed class ConfirmPaymentHandler(
 
         if (bin is not null && await bins.FindAsync(bin, ct) is { } info)
             return new CardFacts(info.Bin, info.BankCode, info.Program, info.Brand,
-                info.CardType, info.IsCommercial);
+                info.CardType, info.IsCommercial, info.Country);
 
         return bin is null && program is null
             ? null

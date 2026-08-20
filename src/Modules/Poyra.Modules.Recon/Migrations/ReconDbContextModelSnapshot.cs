@@ -50,6 +50,11 @@ namespace Poyra.Modules.Recon.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("BankCode")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("bank_code");
+
                     b.Property<Guid>("ConnectorAccountId")
                         .HasColumnType("uuid")
                         .HasColumnName("connector_account_id");
@@ -81,9 +86,11 @@ namespace Poyra.Modules.Recon.Migrations
                     b.HasKey("Id")
                         .HasName("pk_commission_agreements");
 
-                    b.HasIndex("TenantId", "ConnectorAccountId", "InstallmentCount")
+                    b.HasIndex("TenantId", "ConnectorAccountId", "InstallmentCount", "BankCode")
                         .IsUnique()
                         .HasDatabaseName("ix_commission_agreements_tenant_id_connector_account_id_instal");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "ConnectorAccountId", "InstallmentCount", "BankCode"), false);
 
                     b.ToTable("commission_agreements", null, t =>
                         {

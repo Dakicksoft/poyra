@@ -12,7 +12,8 @@ public sealed class PaymentLedger(PaymentsDbContext db) : IPaymentLedger
         => await db.PaymentAttempts.AsNoTracking()
             .Where(a => a.PublicId == orderId && a.Status == AttemptStatus.Captured)
             .Select(a => new LedgerAttempt(
-                a.Id, a.PublicId, a.ConnectorAccountId, a.AmountMinor, a.Installments, a.CapturedAt))
+                a.Id, a.PublicId, a.ConnectorAccountId, a.AmountMinor, a.Installments, a.CapturedAt,
+                a.CardBank))
             .SingleOrDefaultAsync(ct);
 
     public async Task<IReadOnlyList<LedgerAttempt>> GetCapturedForDayAsync(
@@ -27,7 +28,8 @@ public sealed class PaymentLedger(PaymentsDbContext db) : IPaymentLedger
                         && a.CapturedAt >= start && a.CapturedAt < end)
             .OrderBy(a => a.CapturedAt)
             .Select(a => new LedgerAttempt(
-                a.Id, a.PublicId, a.ConnectorAccountId, a.AmountMinor, a.Installments, a.CapturedAt))
+                a.Id, a.PublicId, a.ConnectorAccountId, a.AmountMinor, a.Installments, a.CapturedAt,
+                a.CardBank))
             .ToListAsync(ct);
     }
 

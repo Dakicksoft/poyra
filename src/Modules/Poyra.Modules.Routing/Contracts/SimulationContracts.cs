@@ -2,6 +2,9 @@ namespace Poyra.Modules.Routing.Contracts;
 
 /// <param name="ActualAccountId">İşlemin GERÇEKTE gittiği hesap (ilk deneme).</param>
 /// <param name="ActualCostMinor">O hesabın anlaşma oranından beklenen komisyon.</param>
+/// <param name="Channel">İşlemin geldiği kanal — kanal alanı eklenmeden önceki kayıtlarda null.
+/// Replay'de null kalması ŞARTTIR: "api sayalım" demek kanal kuralını geçmişteki ödeme
+/// linklerine de uygular ve tasarruf tahminini şişirirdi.</param>
 /// <param name="Forced">Hesap elle sabitlendi (ForceConnectorAccountId) — kural devrede değildi;
 /// kural değişse de işyeri zorlamaya devam edeceğinden replay'de "kayma" raporlanmamalı.</param>
 public sealed record HistoricPayment(
@@ -15,7 +18,8 @@ public sealed record HistoricPayment(
     Guid ActualAccountId,
     long? ActualCostMinor,
     DateTimeOffset CreatedAt,
-    bool Forced = false);
+    bool Forced = false,
+    string? Channel = null);
 
 /// <summary>
 /// Simülatörün geçmiş veri kaynağı — Payments uygular (bağımlılık tersine, bkz. RoutingContracts).

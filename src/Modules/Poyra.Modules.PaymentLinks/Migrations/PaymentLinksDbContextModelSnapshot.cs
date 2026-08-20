@@ -106,6 +106,14 @@ namespace Poyra.Modules.PaymentLinks.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("max_usage");
 
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("link")
+                        .HasColumnName("origin");
+
                     b.Property<string>("PublicId")
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()

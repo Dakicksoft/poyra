@@ -26,6 +26,7 @@ internal sealed class PaymentIntentConfiguration : IEntityTypeConfiguration<Paym
         b.Property(x => x.Description).HasMaxLength(500);
         b.Property(x => x.ClientSecret).HasMaxLength(64);
         b.Property(x => x.ReturnUrl).HasMaxLength(2000);
+        b.Property(x => x.Channel).HasMaxLength(20);
         b.Property(x => x.RoutingResultJson).HasColumnName("routing_result").HasColumnType("jsonb");
 
         b.Property(x => x.Status)

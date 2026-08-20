@@ -53,5 +53,6 @@
     <Project Path="tests/Poyra.Tests.E2E/Poyra.Tests.E2E.csproj" />
     <Project Path="tests/Poyra.Tests.Integration/Poyra.Tests.Integration.csproj" />
     <Project Path="tests/Poyra.Tests.Unit/Poyra.Tests.Unit.csproj" />
+    <Project Path="tests/Poyra.Tests.Load/Poyra.Tests.Load.csproj" />
   </Folder>
 </Solution>

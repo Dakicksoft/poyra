@@ -22,7 +22,8 @@ public sealed class CaptureFeed(PaymentsDbContext db) : ICaptureFeed
                     attempt.AmountMinor,
                     intent.Currency,
                     attempt.Installments,
-                    attempt.CapturedAt!.Value))
+                    attempt.CapturedAt!.Value,
+                    attempt.CardBank))
             .Take(limit)
             .ToListAsync(ct);
 
@@ -44,7 +45,8 @@ public sealed class CaptureFeed(PaymentsDbContext db) : ICaptureFeed
                     refund.AmountMinor,
                     intent.Currency,
                     attempt.Installments,
-                    refund.CreatedAt))
+                    refund.CreatedAt,
+                    attempt.CardBank))
             .Take(limit)
             .ToListAsync(ct);
 }

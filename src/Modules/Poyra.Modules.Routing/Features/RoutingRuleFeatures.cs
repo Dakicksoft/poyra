@@ -3,6 +3,9 @@ using FastEndpoints;
 using Microsoft.AspNetCore.Http;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using Poyra.Modules.Routing.Contracts;
+using Poyra.Modules.Routing.Infrastructure;
+using Poyra.SharedKernel.Time;
 using Poyra.Modules.Routing.Domain;
 using Poyra.Modules.Routing.Dsl;
 using Poyra.SharedKernel.Cqrs;
@@ -165,5 +168,159 @@ public sealed class GetActiveRuleEndpoint(IDispatcher dispatcher) : EndpointWith
         }
 
         await Send.OkAsync(result, ct);
+    }
+}
+
+// --- Hacim taahhütleri ------------------------------------------------------
+
+public sealed record VolumeCommitmentDto(
+    Guid Id, Guid ConnectorAccountId, long MonthlyTargetMinor, bool IsActive,
+    long AchievedMinor, long GapMinor, int DaysLeft);
+
+public sealed record UpsertVolumeCommitmentRequest(Guid ConnectorAccountId, long MonthlyTargetMinor);
+
+public sealed record UpsertVolumeCommitmentCommand(Guid ConnectorAccountId, long MonthlyTargetMinor)
+    : Poyra.SharedKernel.Cqrs.ICommand<VolumeCommitmentDto>;
+
+public sealed class UpsertVolumeCommitmentValidator : AbstractValidator<UpsertVolumeCommitmentCommand>
+{
+    public UpsertVolumeCommitmentValidator()
+        => RuleFor(x => x.MonthlyTargetMinor)
+            .GreaterThan(0)
+            .WithMessage("Aylık hedef kuruş cinsinden ve 0'dan büyük olmalı. "
+                         + "Taahhüdü kaldırmak için DELETE kullanın (kayıt pasife çekilir).");
+}
+
+public sealed class UpsertVolumeCommitmentHandler(RoutingDbContext db, TenantContext tenant)
+    : Poyra.SharedKernel.Cqrs.ICommandHandler<UpsertVolumeCommitmentCommand, VolumeCommitmentDto>
+{
+    public async Task<VolumeCommitmentDto> Handle(
+        UpsertVolumeCommitmentCommand command, CancellationToken ct)
+    {
+        var commitment = await db.VolumeCommitments
+            .SingleOrDefaultAsync(c => c.ConnectorAccountId == command.ConnectorAccountId, ct);
+
+        if (commitment is null)
+        {
+            commitment = new VolumeCommitment
+            {
+                TenantId = tenant.TenantId,
+                ConnectorAccountId = command.ConnectorAccountId,
+            };
+            db.VolumeCommitments.Add(commitment);
+        }
+
+        commitment.MonthlyTargetMinor = command.MonthlyTargetMinor;
+        commitment.IsActive = true; // pasife çekilmiş taahhüt yeniden tanımlanırsa canlanır
+        await db.SaveChangesAsync(ct);
+
+        return new VolumeCommitmentDto(
+            commitment.Id, commitment.ConnectorAccountId, commitment.MonthlyTargetMinor,
+            commitment.IsActive, AchievedMinor: 0, GapMinor: commitment.MonthlyTargetMinor,
+            DaysLeft: 0);
+    }
+}
+
+public sealed class UpsertVolumeCommitmentEndpoint(IDispatcher dispatcher)
+    : Endpoint<UpsertVolumeCommitmentRequest, VolumeCommitmentDto>
+{
+    public override void Configure()
+    {
+        Post("/v1/routing/commitments");
+        Description(x => x.WithTags("Routing"));
+        Summary(s => s.Summary =
+            "Hacim taahhüdü: hesap → aylık hedef ciro. 'commitment' stratejisi açığı olan "
+            + "hesabı öne alır; açık kapanınca hesap normal sıraya döner.");
+    }
+
+    public override async Task HandleAsync(UpsertVolumeCommitmentRequest req, CancellationToken ct)
+        => await Send.OkAsync(await dispatcher.Send(
+            new UpsertVolumeCommitmentCommand(req.ConnectorAccountId, req.MonthlyTargetMinor), ct), ct);
+}
+
+public sealed record ListVolumeCommitmentsQuery : IQuery<IReadOnlyList<VolumeCommitmentDto>>;
+
+/// <summary>
+/// Taahhütleri GERÇEKLEŞEN hacimle birlikte döner — hedefi tek başına göstermek işe
+/// yaramaz, işyerinin görmek istediği "ne kadar kaldı, kaç gün var".
+/// </summary>
+public sealed class ListVolumeCommitmentsHandler(RoutingDbContext db, IVolumeProgressSource volumes, IClock clock)
+    : IQueryHandler<ListVolumeCommitmentsQuery, IReadOnlyList<VolumeCommitmentDto>>
+{
+    public async Task<IReadOnlyList<VolumeCommitmentDto>> Handle(
+        ListVolumeCommitmentsQuery query, CancellationToken ct)
+    {
+        var commitments = await db.VolumeCommitments.AsNoTracking()
+            .OrderBy(c => c.ConnectorAccountId)
+            .ToListAsync(ct);
+
+        if (commitments.Count == 0)
+            return [];
+
+        var (periodStart, daysLeft) = RoutingEngine.MonthWindow(clock.UtcNow);
+        var achieved = (await volumes.GetAsync(periodStart, ct))
+            .ToDictionary(v => v.ConnectorAccountId, v => v.VolumeMinor);
+
+        return commitments.Select(c =>
+        {
+            var progress = new CommitmentProgress(
+                c.MonthlyTargetMinor, achieved.GetValueOrDefault(c.ConnectorAccountId), daysLeft);
+
+            return new VolumeCommitmentDto(
+                c.Id, c.ConnectorAccountId, c.MonthlyTargetMinor, c.IsActive,
+                progress.AchievedMinor, progress.GapMinor, daysLeft);
+        }).ToList();
+    }
+}
+
+public sealed class ListVolumeCommitmentsEndpoint(IDispatcher dispatcher)
+    : EndpointWithoutRequest<IReadOnlyList<VolumeCommitmentDto>>
+{
+    public override void Configure()
+    {
+        Get("/v1/routing/commitments");
+        Description(x => x.WithTags("Routing"));
+    }
+
+    public override async Task HandleAsync(CancellationToken ct)
+        => await Send.OkAsync(await dispatcher.Ask(new ListVolumeCommitmentsQuery(), ct), ct);
+}
+
+public sealed record DeactivateVolumeCommitmentCommand(Guid Id)
+    : Poyra.SharedKernel.Cqrs.ICommand<bool>;
+
+public sealed class DeactivateVolumeCommitmentHandler(RoutingDbContext db)
+    : Poyra.SharedKernel.Cqrs.ICommandHandler<DeactivateVolumeCommitmentCommand, bool>
+{
+    public async Task<bool> Handle(DeactivateVolumeCommitmentCommand command, CancellationToken ct)
+    {
+        var commitment = await db.VolumeCommitments.SingleOrDefaultAsync(c => c.Id == command.Id, ct);
+        if (commitment is null)
+            return false;
+
+        // Silinmez, pasife çekilir: geçmiş rota kararlarının gerekçesi bu kayıtta durur
+        commitment.IsActive = false;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+}
+
+public sealed class DeactivateVolumeCommitmentEndpoint(IDispatcher dispatcher)
+    : EndpointWithoutRequest
+{
+    public override void Configure()
+    {
+        Delete("/v1/routing/commitments/{id}");
+        Description(x => x.WithTags("Routing"));
+        Summary(s => s.Summary = "Taahhüdü pasife çeker (kayıt silinmez).");
+    }
+
+    public override async Task HandleAsync(CancellationToken ct)
+    {
+        var id = Route<Guid>("id");
+        if (await dispatcher.Send(new DeactivateVolumeCommitmentCommand(id), ct))
+            await Send.NoContentAsync(ct);
+        else
+            await Send.NotFoundAsync(ct);
     }
 }

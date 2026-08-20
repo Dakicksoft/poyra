@@ -1,6 +1,7 @@
 using Poyra.Modules.Payments.Contracts;
 using Poyra.Modules.Payments.Features.ConfirmDirect;
 using Poyra.Modules.Payments.Features.CreatePayment;
+using Poyra.Modules.Routing.Contracts;
 using Poyra.SharedKernel.Cqrs;
 using Poyra.SharedKernel.Errors;
 
@@ -12,9 +13,12 @@ public sealed class PaymentInitiator(IDispatcher dispatcher) : IPaymentInitiator
         long amountMinor, string currency, string cardToken, string? description,
         string? customerRef, CancellationToken ct)
     {
+        // Bu yol yalnız abonelik/yeniden tahsilat tarafından çağrılır: müşteri ekranda
+        // değildir, kart token'dan gelir. Kanal rotaya bu şekilde bildirilir.
         var created = await dispatcher.Send(new CreatePaymentCommand(
             amountMinor, currency, description, Installments: 1, ReturnUrl: null,
-            CustomerRef: customerRef), ct);
+            CustomerRef: customerRef, CustomerIp: null,
+            Channel: PaymentChannels.Subscription), ct);
 
         try
         {

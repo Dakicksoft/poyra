@@ -377,6 +377,11 @@ namespace Poyra.Modules.Payments.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("amount_minor");
 
+                    b.Property<string>("Channel")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("channel");
+
                     b.Property<string>("ClientSecret")
                         .IsRequired()
                         .HasMaxLength(64)

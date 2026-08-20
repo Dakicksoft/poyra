@@ -17,7 +17,8 @@ public sealed class BinLookup(InstallmentsDbContext db) : IBinLookup
             .Where(b => candidates.Contains(b.Bin))
             .OrderByDescending(b => b.Bin.Length)
             .Select(b => new BinInfo(
-                b.Bin, b.BankCode, b.BankName, b.Program, b.Brand, b.CardType, b.IsCommercial))
+                b.Bin, b.BankCode, b.BankName, b.Program, b.Brand, b.CardType, b.IsCommercial,
+                b.Country))
             .FirstOrDefaultAsync(ct);
     }
 }

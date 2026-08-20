@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Poyra.Api;
@@ -24,6 +25,8 @@ public sealed class FieldSyncTests : IDisposable
 {
     private const string AdminKey = "test-admin-key";
 
+    private readonly PostgresFixture _fixture;
+
     private readonly WebApplicationFactory<ApiEntryPoint> _factory;
     private readonly WebApplicationFactory<CheckoutEntryPoint> _checkoutFactory;
     private readonly HttpClient _api;
@@ -32,6 +35,8 @@ public sealed class FieldSyncTests : IDisposable
 
     public FieldSyncTests(PostgresFixture fixture)
     {
+        _fixture = fixture;
+
         void Configure(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
@@ -495,6 +500,16 @@ public sealed class FieldSyncTests : IDisposable
         var settled = (await CollectionsAsync(tenant.ApiKey)).ShouldHaveSingleItem();
         settled.Status.ShouldBe("succeeded");
         settled.PaymentId.ShouldBe(paymentId);
+
+        // Saha tahsilatı checkout'tan ödendi ama rota için AYRI bir kanaldır: bağlantının
+        // kaynağı (PaymentLink.Origin) ödemenin kanalına taşınmalı, yoksa saha tahsilatı
+        // normal ödeme linkinden ayırt edilemez ve "saha → şu POS" kuralı yazılamaz.
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var intent = await db.PaymentIntents.AsNoTracking()
+                .SingleAsync(i => i.PublicId == paymentId);
+            intent.Channel.ShouldBe("field");
+        }
 
         // Ve gün sonu özetinde artık 'kesinleşen' tarafında
         var report = await SendOk<SettlementReport>(

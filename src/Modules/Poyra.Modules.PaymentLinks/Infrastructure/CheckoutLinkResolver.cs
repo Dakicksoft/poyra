@@ -25,7 +25,8 @@ public sealed class CheckoutLinkResolver(
 
         return new CheckoutLink(
             link.TenantId, link.Id, link.PublicId, link.Slug, link.AmountMinor, link.Currency,
-            link.Description, link.MaxInstallments, link.UnavailableReason(clock.UtcNow));
+            link.Description, link.MaxInstallments, link.UnavailableReason(clock.UtcNow),
+            link.Origin);
     }
 
 

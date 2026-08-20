@@ -12,7 +12,7 @@ namespace Poyra.Modules.Routing.Dsl;
 ///                "route": ["İş POS"], "reason": "yüksek tutar → İş POS" } ],
 ///   "volumeSplit": [ { "account": "İş POS", "percent": 80 }, { "account": "Mock", "percent": 20 } ],
 ///   "fallback": ["Mock"],
-///   "guards": { "skipUnhealthy": true, "maxAttempts": 2 }
+///   "guards": { "skipUnhealthy": true, "maxAttempts": 2, "explorePercent": 10 }
 /// }
 /// Hesaplar etiketle (label) veya Guid ile referanslanır.
 /// </summary>
@@ -70,4 +70,13 @@ public sealed class RuleGuards
 {
     [JsonPropertyName("skipUnhealthy")] public bool SkipUnhealthy { get; set; } = true;
     [JsonPropertyName("maxAttempts")] public int MaxAttempts { get; set; } = 2;
+
+    /// <summary>
+    /// Ölçüm kotası (%): ÖLÇÜLEN sinyale dayanan stratejilerde (best_success · fastest ·
+    /// balanced) trafiğin bu kadarlık kısmı, sinyali olmayan bir adaya ayrılır — yoksa
+    /// kazanan tüm trafiği alır, kaybeden hiç örnek toplayamaz ve penceresi boşalınca
+    /// kalıcı olarak sona düşer (bkz. RoutingEngine.Explore).
+    /// 0 = kapalı. Üst sınır 50: yarıdan fazlası ölçüme giderse strateji anlamını yitirir.
+    /// </summary>
+    [JsonPropertyName("explorePercent")] public int ExplorePercent { get; set; } = 10;
 }

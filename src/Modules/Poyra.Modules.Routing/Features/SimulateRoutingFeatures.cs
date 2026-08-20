@@ -10,6 +10,7 @@ using Poyra.Modules.Routing.Dsl;
 using Poyra.Modules.Routing.Infrastructure;
 using Poyra.SharedKernel.Cqrs;
 using Poyra.SharedKernel.Errors;
+using Poyra.SharedKernel.Time;
 
 namespace Poyra.Modules.Routing.Features;
 
@@ -71,6 +72,9 @@ public sealed class SimulateRoutingValidator : AbstractValidator<SimulateRouting
 /// ayrıca sayılır (sessizce sıfır sayılmaz).
 /// Bilinen sınırlar (tahmin, birebir replay değildir):
 ///  - Sağlık ve uygunluk elemeleri BUGÜNKÜ fotoğrafla yapılır — geçmişteki durum bilinmez.
+///  - Hacim taahhüdü ilerlemesi de bugünkü fotoğraftır: "o işlem yapılırken açık ne kadardı"
+///    sorusu geriye doğru kurulamaz. 'commitment' stratejisiyle yapılan simülasyon, sıralamayı
+///    ayın BUGÜNKÜ durumuna göre gösterir — işlemin kendi gününe göre değil.
 ///  - Eski kayıtlarda (karar-anı kartı RoutingResultJson'a yazılmadan önce) kart MaskedPan'dan
 ///    yaklaşıklanır; pencere kaydıkça bu dal kendiliğinden ölür.
 ///  - Direct akışın "konnektör direct/3DS sunmuyor" elemesi simüle edilmez: bu yetenek
@@ -82,9 +86,31 @@ public sealed class SimulateRoutingHandler(
     ICommissionRateSource rates,
     IConnectorPerformanceSource performance,
     IHistoricPaymentSource history,
-    IExecutionFeasibilitySource feasibility)
+    IExecutionFeasibilitySource feasibility,
+    IVolumeProgressSource volumes,
+    IClock clock)
     : IQueryHandler<SimulateRoutingQuery, SimulationResultDto>
 {
+    /// <summary>Motorla aynı pencere ve aynı birleştirme — ikisi sapmasın diye tek kural.</summary>
+    private async Task<Dictionary<Guid, CommitmentProgress>> BuildCommitmentsAsync(CancellationToken ct)
+    {
+        var commitments = await db.VolumeCommitments.AsNoTracking()
+            .Where(c => c.IsActive)
+            .ToListAsync(ct);
+
+        if (commitments.Count == 0)
+            return [];
+
+        var (periodStart, daysLeft) = RoutingEngine.MonthWindow(clock.UtcNow);
+        var achieved = (await volumes.GetAsync(periodStart, ct))
+            .ToDictionary(v => v.ConnectorAccountId, v => v.VolumeMinor);
+
+        return commitments.ToDictionary(
+            c => c.ConnectorAccountId,
+            c => new CommitmentProgress(
+                c.MonthlyTargetMinor, achieved.GetValueOrDefault(c.ConnectorAccountId), daysLeft));
+    }
+
     public async Task<SimulationResultDto> Handle(SimulateRoutingQuery query, CancellationToken ct)
     {
         var candidateDocument = RuleDocument.Parse(query.Document.GetRawText());
@@ -106,7 +132,13 @@ public sealed class SimulateRoutingHandler(
         // Sinyaller bir kez çekilir; taksit sayısına göre oran tablosu önbelleklenir
         var performanceByAccount = (await performance.GetAsync(RoutingEngine.PerformanceWindow, ct))
             .ToDictionary(p => p.ConnectorAccountId);
-        var ratesByInstallment = new Dictionary<int, Dictionary<Guid, int>>();
+
+        // Taahhüt ilerlemesi BUGÜNKÜ fotoğraftır (bkz. sınırlar): geçmiş bir işlemin
+        // yapıldığı andaki açık bilinmez, o gün için hacim geriye doğru yeniden kurulamaz.
+        var commitmentByAccount = await BuildCommitmentsAsync(ct);
+        // Önbellek anahtarı BANKAYI da taşır: on-us oranı karta göre değişir, yalnız
+        // taksitle anahtarlansaydı ilk işlemin bankası bütün işlemlere uygulanırdı.
+        var ratesByKey = new Dictionary<(int Installments, string? Bank), Dictionary<Guid, int>>();
         var feasibleByKey = new Dictionary<(int Installments, string? Program), IReadOnlySet<Guid>>();
 
         var changes = new List<SimulationChangeDto>();
@@ -123,21 +155,23 @@ public sealed class SimulateRoutingHandler(
                 continue;
             }
 
-            if (!ratesByInstallment.TryGetValue(payment.Installments, out var rateMap))
+            var rateKey = (payment.Installments, payment.Card?.BankCode);
+            if (!ratesByKey.TryGetValue(rateKey, out var rateMap))
             {
-                rateMap = (await rates.GetRatesAsync(payment.Installments, ct))
+                rateMap = (await rates.GetRatesAsync(rateKey.Installments, rateKey.Item2, ct))
                     .ToDictionary(r => r.ConnectorAccountId, r => r.RateBps);
-                ratesByInstallment[payment.Installments] = rateMap;
+                ratesByKey[rateKey] = rateMap;
             }
 
             var candidates = eligible
-                .Select(a => RoutingEngine.Enrich(a, payment.AmountMinor, rateMap, performanceByAccount))
+                .Select(a => RoutingEngine.Enrich(
+                    a, payment.AmountMinor, rateMap, performanceByAccount, commitmentByAccount))
                 .ToList();
 
             // Ortak karar çekirdeği: kural → hacim bölüşümü → strateji — motor ne yaparsa o.
             // Seed gerçek intent id'si olduğundan bölüşüm kovası da motordakiyle birebir aynı düşer.
             var facts = new RoutingFacts(payment.Seed, payment.AmountMinor, payment.Currency,
-                payment.Installments, payment.HourLocal, payment.Card);
+                payment.Installments, payment.HourLocal, payment.Card, payment.Channel);
             var decision = RoutingEngine.DecideCore(candidateDocument, facts, candidates);
 
             // Confirm döngüsüyle aynı yürüyüş: zincirin ilk MaxAttempts adayından, yürütme-anı

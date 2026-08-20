@@ -11,6 +11,15 @@ public sealed class CardBin : IAuditable
     public required string Brand { get; set; } // visa/mastercard/troy/amex
     public required string CardType { get; set; } // credit/debit/prepaid
     public bool IsCommercial { get; set; }
+
+    /// <summary>
+    /// Kartı çıkaran ülkenin ISO-3166 alpha-2 kodu (TR, DE, US…). Varsayılan "TR":
+    /// katalog Türkiye BIN'leriyle doldurulur ve yurt dışı kart burada AÇIKÇA işaretlenir.
+    /// "Katalogda yok = yabancı" varsayımı yapılamaz — eksik katalog kaydıyla gerçekten
+    /// yabancı kart aynı görünürdü; ülke kuralı o zaman TR kartlarını da yakalardı.
+    /// </summary>
+    public string Country { get; set; } = "TR";
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

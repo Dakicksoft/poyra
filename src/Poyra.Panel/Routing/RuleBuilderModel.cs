@@ -40,6 +40,11 @@ public static class RuleFacts
         new("hour", "Saat (TR, 0-23)", FactKind.Number, "Türkiye saati — gece toplu işler için"),
         new("currency", "Para birimi", FactKind.Choice, Choices:
             [("TRY", "TRY"), ("USD", "USD"), ("EUR", "EUR")]),
+        new("channel", "Kanal", FactKind.Choice,
+            "Ödemenin Poyra'ya girdiği yol — işyerinin kendi sitesi/uygulaması ayrımı değil",
+            Choices:
+            [("api", "API (işyeri sunucusu)"), ("link", "Ödeme linki"),
+             ("field", "Saha tahsilatı"), ("subscription", "Abonelik yenilemesi")]),
         new("bin", "Kart BIN'i", FactKind.Text, "İlk 6-8 hane (PAN değil)"),
         new("card.bank", "Kart bankası (kod)", FactKind.Text,
             "0062 Garanti · 0064 İş · 0067 Yapı Kredi · 0046 Akbank — kendi POS bankanızla eşitse 'on-us'",
@@ -56,6 +61,10 @@ public static class RuleFacts
             [("credit", "Kredi"), ("debit", "Banka"), ("prepaid", "Ön ödemeli")],
             Aliases: ["card_type"]),
         new("card.commercial", "Ticari kart", FactKind.Boolean, "Kurumsal/ticari kartlar"),
+        new("card.country", "Kart ülkesi", FactKind.Text,
+            "ISO-3166 alpha-2: TR, DE, US… — yurt dışı kartı Stripe/Adyen'e yollamak için "
+            + "(BIN katalogda yoksa ülke bilinmez ve kural eşleşmez)",
+            Aliases: ["country"]),
     ];
 
     public static FactDefinition? Find(string? fact)
@@ -118,11 +127,23 @@ public sealed class RuleBuilderModel
     public List<string> Fallback { get; set; } = [];
     public bool SkipUnhealthy { get; set; } = true;
     public int MaxAttempts { get; set; } = 2;
+    public int ExplorePercent { get; set; } = 10;
     public double CostWeight { get; set; } = 1;
     public double SuccessWeight { get; set; } = 1;
     public double LatencyWeight { get; set; } = 0.5;
 
     public bool Advanced { get; private set; }
+
+    /// <summary>
+    /// Ölçüm kotası yalnız ÖLÇÜLEN sinyale dayanan stratejilerde iş görür; cheapest
+    /// (anlaşma oranı) ve priority (hesap önceliği) trafikten beslenmez. Alan da yalnız
+    /// o stratejiler seçiliyken gösterilir — dengeli ağırlıklar satırıyla aynı desen.
+    /// </summary>
+    public bool ShowExploreQuota
+        => MeasuredStrategies.Contains(Strategy)
+           || Rules.Any(r => r.Strategy is { } s && MeasuredStrategies.Contains(s));
+
+    private static readonly string[] MeasuredStrategies = ["best_success", "fastest", "balanced"];
 
     public static readonly IReadOnlyList<(string Value, string Label)> Strategies =
     [
@@ -131,6 +152,7 @@ public sealed class RuleBuilderModel
         ("best_success", "En yüksek başarı"),
         ("fastest", "En hızlı yanıt"),
         ("balanced", "Dengeli (ağırlıklı)"),
+        ("commitment", "Hacim taahhüdü"),
     ];
 
     public static RuleBuilderModel FromJson(JsonElement document)
@@ -150,6 +172,7 @@ public sealed class RuleBuilderModel
         model.Strategy = parsed.Strategy ?? "priority";
         model.SkipUnhealthy = parsed.Guards.SkipUnhealthy;
         model.MaxAttempts = parsed.Guards.MaxAttempts;
+        model.ExplorePercent = parsed.Guards.ExplorePercent;
         model.CostWeight = parsed.Weights.Cost;
         model.SuccessWeight = parsed.Weights.Success;
         model.LatencyWeight = parsed.Weights.Latency;
@@ -267,6 +290,7 @@ public sealed class RuleBuilderModel
         {
             ["skipUnhealthy"] = SkipUnhealthy,
             ["maxAttempts"] = MaxAttempts,
+            ["explorePercent"] = ExplorePercent,
         };
 
         if (Strategy == "balanced" || Rules.Any(r => r.Strategy == "balanced"))

@@ -2,6 +2,8 @@ using System.Buffers.Text;
 using System.Security.Cryptography;
 using Poyra.SharedKernel.Domain;
 
+using Poyra.Modules.PaymentLinks.Contracts;
+
 namespace Poyra.Modules.PaymentLinks.Domain;
 
 public enum PaymentLinkStatus
@@ -40,6 +42,14 @@ public sealed class PaymentLink : ITenantOwned, IAuditable
 
     /// <summary>0 = sınırsız. Aşıldığında link kapanır (tek kullanımlık link için 1).</summary>
     public int MaxUsage { get; init; }
+
+    /// <summary>
+    /// Bağlantıyı kimin ürettiği (bkz. PaymentLinkOrigins): panel/API mi, saha uygulaması mı.
+    /// Ödemenin kanalına taşınır — rota "saha tahsilatı şu POS'a gitsin" diyebilsin diye.
+    /// Alan eklenmeden önceki bağlantılar varsayılan "link" sayılır: saha bağlantıları o
+    /// dönemde de azınlıktı ve yanlış tarafa düşen kayıt yalnız kanal kuralını etkiler.
+    /// </summary>
+    public string Origin { get; init; } = PaymentLinkOrigins.Link;
 
     public int SuccessCount { get; set; }
     public PaymentLinkStatus Status { get; set; } = PaymentLinkStatus.Active;

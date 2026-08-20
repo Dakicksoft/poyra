@@ -8,6 +8,6 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
     <InvariantGlobalization>false</InvariantGlobalization>
     <AnalysisLevel>latest</AnalysisLevel>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
   </PropertyGroup>
 </Project>

@@ -7,14 +7,16 @@ using Poyra.SharedKernel.Cqrs;
 
 namespace Poyra.Modules.Installments.Features;
 
+/// <param name="Country">ISO-3166 alpha-2; verilmezse "TR" sayılır (katalog TR odaklıdır).</param>
 public sealed record CardBinDto(
     string Bin, string BankCode, string BankName, string Program,
-    string Brand, string CardType, bool IsCommercial);
+    string Brand, string CardType, bool IsCommercial, string? Country = null);
 
 internal static class CardBinMap
 {
     public static CardBinDto ToDto(CardBin bin)
-        => new(bin.Bin, bin.BankCode, bin.BankName, bin.Program, bin.Brand, bin.CardType, bin.IsCommercial);
+        => new(bin.Bin, bin.BankCode, bin.BankName, bin.Program, bin.Brand, bin.CardType,
+            bin.IsCommercial, bin.Country);
 }
 
 public sealed record UpsertCardBinsRequest(List<CardBinDto> Bins);
@@ -36,6 +38,9 @@ public sealed class UpsertCardBinsValidator : AbstractValidator<UpsertCardBinsCo
             bin.RuleFor(b => b.Program).NotEmpty().MaximumLength(20);
             bin.RuleFor(b => b.Brand).NotEmpty().MaximumLength(20);
             bin.RuleFor(b => b.CardType).NotEmpty().MaximumLength(10);
+            bin.RuleFor(b => b.Country)
+                .Must(c => c is null || (c.Length == 2 && c.All(char.IsAsciiLetter)))
+                .WithMessage("Ülke ISO-3166 alpha-2 olmalı (TR, DE, US…).");
         });
     }
 }
@@ -60,6 +65,7 @@ public sealed class UpsertCardBinsHandler(InstallmentsDbContext db)
                 bin.Brand = dto.Brand.ToLowerInvariant();
                 bin.CardType = dto.CardType.ToLowerInvariant();
                 bin.IsCommercial = dto.IsCommercial;
+                bin.Country = Country(dto);
             }
             else
             {
@@ -72,6 +78,7 @@ public sealed class UpsertCardBinsHandler(InstallmentsDbContext db)
                     Brand = dto.Brand.ToLowerInvariant(),
                     CardType = dto.CardType.ToLowerInvariant(),
                     IsCommercial = dto.IsCommercial,
+                    Country = Country(dto),
                 });
             }
         }
@@ -79,6 +86,17 @@ public sealed class UpsertCardBinsHandler(InstallmentsDbContext db)
         await db.SaveChangesAsync(ct);
         return command.Bins.Count;
     }
+
+    /// <summary>
+    /// Ülke verilmezse TR: katalog Türkiye BIN'leriyle doldurulur.
+    /// ASCII harf denetimi BURADA da yapılır — doğrulayıcıya güvenip geçilseydi büyütme
+    /// kültüre bağlı bir metne uygulanabilirdi ("i" → "İ" tuzağı). Denetim sayesinde
+    /// ToUpperInvariant yalnız ASCII harf görür.
+    /// </summary>
+    private static string Country(CardBinDto dto)
+        => dto.Country is { Length: 2 } country && country.All(char.IsAsciiLetter)
+            ? country.ToUpperInvariant()
+            : "TR";
 }
 
 public sealed record UpsertCardBinsResponse(int Count);

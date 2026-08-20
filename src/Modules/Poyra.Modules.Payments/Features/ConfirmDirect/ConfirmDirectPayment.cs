@@ -98,7 +98,7 @@ public sealed class ConfirmDirectPaymentHandler(
             ? new RoutingDecision([forced], "Elle seçilen bağlantı hesabı.", 1, null, null)
             : await routing.DecideAsync(new RoutingFacts(
                 intent.Id, intent.AmountMinor, intent.Currency, intent.Installments,
-                TurkeyHour(clock), cardFacts), ct);
+                TurkeyHour(clock), cardFacts, intent.Channel), ct);
 
         if (decision.AccountIds.Count == 0)
             throw new PoyraException(409, "routing.no_route", decision.Reason);
@@ -362,7 +362,8 @@ public sealed class ConfirmDirectPaymentHandler(
 
     private async Task<CardFacts?> CardFactsAsync(string bin, string? program, CancellationToken ct)
         => await bins.FindAsync(bin, ct) is { } info
-            ? new CardFacts(info.Bin, info.BankCode, info.Program, info.Brand, info.CardType, info.IsCommercial)
+            ? new CardFacts(info.Bin, info.BankCode, info.Program, info.Brand, info.CardType,
+                info.IsCommercial, info.Country)
             : new CardFacts(bin, null, program, null, null, false); // katalogda yoksa yalnız BIN taşınır
 
     private async Task<CardData> ResolveCardAsync(ConfirmDirectPaymentCommand command, CancellationToken ct)

@@ -34,6 +34,7 @@ public sealed record PaymentTimelineDto(
     string Currency,
     int Installments,
     string? Description,
+    string? Channel,
     JsonElement? RoutingResult,
     IReadOnlyList<TimelineAttemptDto> Attempts,
     IReadOnlyList<TimelineEventDto> Events,
@@ -72,7 +73,7 @@ public sealed class GetPaymentTimelineHandler(PaymentsDbContext db)
 
         return new PaymentTimelineDto(
             intent.PublicId, PaymentStatusMap.ToDb[intent.Status], intent.AmountMinor, intent.Currency,
-            intent.Installments, intent.Description,
+            intent.Installments, intent.Description, intent.Channel,
             intent.RoutingResultJson is { } routing ? JsonDocument.Parse(routing).RootElement.Clone() : null,
             attempts,
             events.Select(e => new TimelineEventDto(

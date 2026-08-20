@@ -53,6 +53,15 @@ namespace Poyra.Modules.Installments.Migrations
                         .HasColumnType("character varying(10)")
                         .HasColumnName("card_type");
 
+                    b.Property<string>("Country")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(2)
+                        .HasColumnType("character(2)")
+                        .HasDefaultValue("TR")
+                        .HasColumnName("country")
+                        .IsFixedLength();
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");

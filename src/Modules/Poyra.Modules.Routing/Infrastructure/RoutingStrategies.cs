@@ -10,17 +10,44 @@ public static class RoutingStrategies
     public const string BestSuccess = "best_success";
     public const string Fastest = "fastest";
     public const string Balanced = "balanced";
+    public const string Commitment = "commitment";
 
     /// <summary>Performans sinyali bu örnek sayısının altındaysa güvenilmez sayılır.</summary>
     public const int MinimumSample = 20;
 
     public static bool IsKnown(string strategy)
-        => strategy is Priority or Cheapest or BestSuccess or Fastest or Balanced;
+        => strategy is Priority or Cheapest or BestSuccess or Fastest or Balanced or Commitment;
+
+    /// <summary>
+    /// Strateji ÖLÇÜLEN sinyale mi dayanıyor? Ölçülen sinyaller (başarı oranı, gecikme)
+    /// yalnız trafik akarken tazelenir — bu stratejiler ölçüm kotasına muhtaçtır.
+    /// cheapest yapılandırılmış anlaşma oranını okur (trafikten bağımsız), priority ise
+    /// hesabın önceliğini; ikisi de kotaya girmez.
+    /// </summary>
+    public static bool UsesMeasuredSignals(string strategy)
+        => strategy is BestSuccess or Fastest or Balanced;
+
+    /// <summary>
+    /// Adayın, ilgili stratejinin baktığı sinyali YOK mu? İki hâlde olur: hesap yeni
+    /// (hiç ölçülmedi) ya da eski kazanan kaybettiği için penceresi boşaldı. Her ikisi de
+    /// "ölçülmeye muhtaç" demektir; kota tam bu adaylara ayrılır.
+    /// </summary>
+    public static bool IsUnmeasured(RoutingCandidate candidate, string strategy) => strategy switch
+    {
+        BestSuccess => candidate.AuthRate is null,
+        Fastest => candidate.MedianLatencyMs is null,
+        Balanced => candidate.AuthRate is null || candidate.MedianLatencyMs is null,
+        _ => false,
+    };
 
     /// <summary>
     /// Adayları stratejiye göre sıralar. Sinyali OLMAYAN aday elenmez — sona alınır:
     /// yeni eklenen bir POS "veri yok" diye tamamen dışlanmaz, ama öne de geçmez.
     /// Eşitlikte öncelik sırası (giriş sırası) korunur — karar deterministiktir.
+    ///
+    /// <c>commitment</c>: taahhüdü olmayan ya da taahhüdünü TUTMUŞ hesabın aciliyeti
+    /// 0'dır; açığı olanların arkasına düşer ama elenmez. Böylece açık kapanınca hesap
+    /// kendiliğinden öncelik sırasına döner — bunun için ayrı bir kural gerekmez.
     /// </summary>
     public static IReadOnlyList<RoutingCandidate> Order(
         IReadOnlyList<RoutingCandidate> candidates, string strategy, StrategyWeights weights)
@@ -30,6 +57,7 @@ public static class RoutingStrategies
             BestSuccess => [.. candidates.OrderByDescending(c => c.AuthRate ?? -1)],
             Fastest => [.. candidates.OrderBy(c => c.MedianLatencyMs ?? int.MaxValue)],
             Balanced => [.. candidates.OrderByDescending(c => Score(c, candidates, weights))],
+            Commitment => [.. candidates.OrderByDescending(c => c.Commitment?.RequiredDailyMinor ?? 0)],
             _ => candidates, // priority: gelen sıra (hesap önceliği) korunur
         };
 

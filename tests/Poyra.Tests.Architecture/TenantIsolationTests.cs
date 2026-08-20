@@ -284,6 +284,7 @@ public sealed class TurkishCasingGuardTests
         ("dto.Program", "Kart programı — ASCII."),
         ("dto.Brand", "Kart markası — ASCII."),
         ("dto.CardType", "Kart tipi — ASCII."),
+        ("country.ToUpperInvariant()", "ISO-3166 alpha-2 — çağrı yerinde ASCII harf denetimli."),
         ("type", "Ekstre satır tipi — ASCII."),
         ("parts[1]", "Ekstre satır tipi — İ zaten açıkça katlanıyor."),
         ("Sms:Provider", "Yapılandırma anahtarı — ASCII."),

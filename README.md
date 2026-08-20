@@ -10,7 +10,7 @@
 [![Lisans: AGPL-3.0](https://img.shields.io/badge/Lisans-AGPL--3.0-blue.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-336791)](https://www.postgresql.org/)
-[![Testler](https://img.shields.io/badge/testler-1.111%20ge%C3%A7ti-brightgreen)](#testler)
+[![Testler](https://img.shields.io/badge/testler-1.197%20ge%C3%A7ti-brightgreen)](#testler)
 
 [Karşılaştırma](#alternatifler) · [Ekran görüntüleri](#ekran-görüntüleri) · [Özellikler](#özellikler) · [Konnektörler](#konnektörler) · [Mimari](#mimari) · [Akışlar](#akışlar) · [Kurulum](#hızlı-başlangıç-geliştirme-ortamı) · [Geliştirme](#geliştirme-rehberi) · [Yol haritası](#yol-haritası) · [Lisans](#lisans)
 
@@ -156,8 +156,10 @@ sayfasında alınır.
 - Void (gün sonu öncesi komisyonsuz iptal), kısmi iade, `Idempotency-Key` (API geneli)
 
 **Orkestrasyon**
-- Kural DSL'i (all/any, kart sinyalleri: BIN, banka, on-us, program, tip) + stratejiler: `cheapest` · `best_success` · `fastest` · `balanced` · `priority`, hacim bölüşümü, fallback
+- Kural DSL'i (all/any, kart sinyalleri: BIN, banka, on-us, program, tip, **ülke**; **kanal:** API · ödeme linki · saha tahsilatı · abonelik yenilemesi) + stratejiler: `cheapest` · `best_success` · `fastest` · `balanced` · `commitment` · `priority`, hacim bölüşümü, fallback
 - Initiate aşamasında failover; canary sağlık yoklaması (bozuk POS rotadan otomatik düşer)
+- **Hacim taahhüdü:** "bu bankaya ayda X ₺ söz verdim" tanımlanır; `commitment` stratejisi açığı olan hesabı öne alır (aciliyet = kalan tutar ÷ kalan gün), açık kapanınca hesap kendiliğinden öncelik sırasına döner. Taahhüt tutmazsa banka indirimli oranı geri çeker — Poyra bunu ay sonunda değil, gün gün gösterir
+- **Ölçüm kotası:** başarı/hız sinyaline dayanan stratejilerde trafiğin %10'u (ayarlanır) ölçümü olmayan POS'a ayrılır — yoksa kazanan POS tüm trafiği alır, ölçülemeyen POS penceresi boşalınca kalıcı olarak sona düşer ve banka toparlansa bile geri dönemez. Kova deterministiktir; kotaya düşen deneme başarısız olursa failover en iyi POS'u yakalar
 - Simülatör: aday kuralı geçmiş işlemlerde oynatır, POS değişimini ve komisyon tasarrufunu raporlar
 - Sürümlü kurallar + panelden iki aşamalı yayın + tek tık geri dönüş (rollback)
 
@@ -165,6 +167,7 @@ sayfasında alınır.
 - Para defteri: tahsilat → bankadan alacak (beklenen komisyon + iş günü valörü); `expected*` ile `confirmed*` ayrı durur
 - Üç yönlü mutabakat: Poyra defteri ↔ POS ekstresi ↔ banka **hesap ekstresi** (MT940/CSV); tek kuruş fark bile bulgudur
 - Komisyon denetimi + "Bankaya İtiraz Raporu"; itiraz talebi kısmi tahsilatlarla kapanışa kadar izlenir
+- **On-us oranı:** komisyon anlaşması karta göre daralır (kendi bankanızın kartı daha ucuza geçer). Aynı oran rota maliyetinde, alacak defterinde ve ekstre denetiminde **tek yerden** çözülür — ayrışsalardı denetim, doğru kesim yapan bankayı haksız yere suçlardı
 - Valör kaybı: `tutar × (yıllık oran / 365) × gecikme günü` — "3 gün gecikme 280,48 ₺'ye mal oldu"
 - Logo/Mikro çift taraflı muhasebe fişi (Tekdüzen Plan, dengesiz fiş üretilmez), TR biçimli CSV dışa aktarım
 
@@ -603,19 +606,50 @@ docker compose -f docker-compose.prod.yml up -d
 dotnet test                # hepsi, kapsam olmadan
 ```
 
-1.111 test, dört katman — hangi katmanın neyi kanıtladığı:
+1.197 test, dört katman — hangi katmanın neyi kanıtladığı:
 
-- **719 birim** — konnektör hash'leri, TOTP RFC 6238 vektörleri, taksit matematiği,
+- **788 birim** — konnektör hash'leri, TOTP RFC 6238 vektörleri, taksit matematiği,
   EMV QR, yeniden tahsilat politikası ve **konnektör uyum kiti** (her `IPaymentConnector`
   uygulamasının tutmak zorunda olduğu ortak sözleşme; konnektör listesi DI kaydından
   okunur, yeni banka eklendiğinde kendiliğinden kapsanır).
 - **37 mimari/PCI bekçisi** — modül sınırı, CVV sütunu yokluğu, düz PAN taraması.
-- **334 entegrasyon** — gerçek PG 18 + gerçek HTTP webhook alıcısı + panel/checkout
+- **350 entegrasyon** — gerçek PG 18 + gerçek HTTP webhook alıcısı + panel/checkout
   HTML doğrulaması + LISTEN/NOTIFY + arka plan işlerinin işyeri döngüsü.
-- **21 E2E** — gerçek tarayıcı (Playwright): interaktif adalar (canlı akış, rota
+- **22 E2E** — gerçek tarayıcı (Playwright): interaktif adalar (canlı akış, rota
   tasarımcısı), TOTP 2FA yolculuğu, tehlikeli aksiyon onayı, tek kullanımlık sır,
   375px mobil çekmece, yazdırma stilleri. Uygulamalar test sürecinde gerçek Kestrel
   portlarında ayağa kalkar — dışarıda ayakta duran servise bağımlılık yok.
+
+### Yük profili
+
+Testlerin dördüncü katmanı doğruluğu kanıtlar; ölçek iddiası ayrı bir araca bırakıldı.
+`tests/Poyra.Tests.Load` bir **konsol uygulamasıdır** — `dotnet test` onu görmez, CI'ın
+normal akışına karışmaz, elle ya da [ayrı workflow](.github/workflows/yuk-profili.yml)
+ile koşar:
+
+```bash
+dotnet run --project tests/Poyra.Tests.Load -c Release -- --sure 30 --es 16
+```
+
+Hazır bir yük aracı yerine ~250 satır elle yazıldı: NBomber v6 kurumsal kullanımda ücretli
+aboneliğe bağlı ve paketi buraya eklemek, **Poyra'yı self-host eden her kuruma** aynı
+yükümlülüğü bindirirdi. k6 lisans açısından uygun ama yalnız HTTP konuşur — rota karar
+çekirdeğinin süreç içi ölçümü onunla yazılamazdı.
+
+Bir geliştirici dizüstünde (Docker'da ayarsız PG 18, MockBank, yük üreteci uygulamayla
+aynı süreçte), 10 sn · 16 eşzamanlı:
+
+| Senaryo | RPS | p50 | p99 | hata |
+|---|--:|--:|--:|--:|
+| `rota-karari` — karar çekirdeği, I/O yok | **318.000** | 2 µs | 4 µs | %0 |
+| `odeme-olustur` — yazma yolu (RLS + olay defteri) | **2.400** | 12 ms | 25 ms | %0 |
+| `odeme-confirm` — tam akış (rota + POS + deneme) | **272** | 48 ms | 218 ms | %0 |
+
+Okunuşu: **rota kararı darboğaz değil** — mikrosaniyelik bir iştir, ödeme başına bir kez
+koşar ve toplam maliyette görünmez. Tam akış bu donanımda ~16 eşzamanlıda doyuma ulaşır
+(günde ~23 milyon işlem); ötesinde gecikme büyür ama verim artmaz. Araç bunu kendisi
+raporlar — rakamların yanına ölçüm koşullarını da basar, çünkü koşulsuz bir yük rakamı
+pazarlama cümlesidir, mühendislik verisi değil.
 
 Kapsam: satır **%80,7** · dal **%54,3** · metot **%90**. CI iki aşamalıdır — önce
 Docker'sız hızlı katman (~1 dk), o yeşilse tam süit + kapsam kapısı. Kapı bir hedef değil

@@ -125,6 +125,16 @@ public sealed class SubscriptionFlowTests : IDisposable
         first.AttemptCount.ShouldBe(1);
         first.LastPaymentId.ShouldStartWith("pay_"); // normal ödeme defterinde görünür
 
+        // Abonelik tahsilatı rotaya "subscription" kanalıyla girer: müşteri ekranda değildir,
+        // kart token'dan gelir. Rota "yenilemeleri en yüksek başarılı POS'a" diyebilsin diye
+        // bu kanalın API ödemesinden ayrılması şart.
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var intent = await db.PaymentIntents.AsNoTracking()
+                .SingleAsync(i => i.PublicId == first.LastPaymentId);
+            intent.Channel.ShouldBe("subscription");
+        }
+
         // Dönem sonunu geçmişe çekip tahakkuk işini koş → yeni dönem faturalanır
         await ShiftPeriodEndToPastAsync(tenant.TenantId, subscription.Id);
         await RunBillingAsync(tenant.TenantId);

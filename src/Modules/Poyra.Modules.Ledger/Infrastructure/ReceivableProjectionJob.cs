@@ -85,7 +85,8 @@ public sealed class ReceivableProjectionJob(
             if (!known.Add(charge.AttemptPublicId))
                 continue;
 
-            var term = await terms.FindAsync(charge.ConnectorAccountId, charge.Installments, default);
+            var term = await terms.FindAsync(
+                charge.ConnectorAccountId, charge.Installments, charge.CardBank, default);
 
             // İade alacağı AZALTIR: işaretler ters çevrilir ki toplam doğru çıksın
             var sign = kind == ReceivableKind.Refund ? -1 : 1;

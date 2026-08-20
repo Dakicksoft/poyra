@@ -522,4 +522,304 @@ public sealed class RoutingV2Tests : IDisposable
         intent.RoutingResultJson = json;
         await db.SaveChangesAsync();
     }
+
+    [Fact]
+    public async Task Kanal_kurali_api_odemesini_hedef_pos_a_yonlendirmeli()
+    {
+        var (tenant, _, pahali) = await SeedAsync();
+
+        // Kural: API'den gelen ödemeler öncelikli hatta, gerisi en ucuza.
+        // Strateji "cheapest" olduğu için kural olmasaydı Ucuz POS seçilirdi.
+        await ActivateRuleAsync(tenant.ApiKey, new
+        {
+            strategy = "cheapest",
+            rules = new[]
+            {
+                new
+                {
+                    name = "api-hatti",
+                    when = new { fact = "channel", op = "eq", value = "api" },
+                    route = new[] { "Pahalı POS" },
+                    reason = "API kanalı → öncelikli hat",
+                },
+            },
+        });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var intent = await db.PaymentIntents.AsNoTracking().SingleAsync(p => p.PublicId == payment.Id);
+            intent.Channel.ShouldBe("api");
+
+            var attempt = await db.PaymentAttempts.AsNoTracking().SingleAsync();
+            attempt.ConnectorAccountId.ShouldBe(pahali.Id); // kanal kuralı maliyeti ezdi
+        }
+
+        (await RoutingResultAsync(tenant.TenantId, payment.Id))
+            .GetProperty("reason").GetString().ShouldContain("API kanalı");
+    }
+
+    [Fact]
+    public async Task Isyeri_kanali_istek_govdesiyle_degistirememeli()
+    {
+        // Kanal, rota kuralının dayandığı bir sinyaldir; işyerinin beyanına bırakılsaydı
+        // "saha tahsilatı" kuralına API'den istek atarak girilebilirdi. Uç nokta kanalı
+        // kendisi yazar, gövdedeki alan bağlanmaz.
+        var (tenant, ucuz, _) = await SeedAsync();
+        await ActivateRuleAsync(tenant.ApiKey, new
+        {
+            strategy = "cheapest",
+            rules = new[]
+            {
+                new
+                {
+                    name = "saha-hatti",
+                    when = new { fact = "channel", op = "eq", value = "field" },
+                    route = new[] { "Pahalı POS" },
+                    reason = "saha → Pahalı POS",
+                },
+            },
+        });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true, channel = "field" },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
+        var intent = await db.PaymentIntents.AsNoTracking().SingleAsync(p => p.PublicId == payment.Id);
+        intent.Channel.ShouldBe("api"); // gövdedeki "field" yok sayıldı
+
+        var attempt = await db.PaymentAttempts.AsNoTracking().SingleAsync();
+        attempt.ConnectorAccountId.ShouldBe(ucuz.Id); // saha kuralı eşleşmedi → strateji
+    }
+
+
+    [Fact]
+    public async Task On_us_orani_cheapest_stratejisinin_kazananini_degistirmeli()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        // "Pahalı POS" aslında Garanti'nin POS'u: kendi kartına %1,20 (on-us), gerisine %3,20.
+        // Genel oranlarda Ucuz POS (%1,80) kazanır; Garanti kartında on-us öne geçmeli.
+        await SendOk<object>(HttpMethod.Post, "/v1/recon/agreements",
+            new { connectorAccountId = pahali.Id, installmentCount = 1, rateBps = 120, valorDays = 1,
+                  bankCode = "0062" },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await SendOk<object>(HttpMethod.Post, "/v1/bins", new
+        {
+            bins = new[]
+            {
+                new
+                {
+                    bin = "540061", bankCode = "0062", bankName = "Garanti", program = "bonus",
+                    brand = "mastercard", cardType = "credit", isCommercial = false,
+                },
+                new
+                {
+                    bin = "450803", bankCode = "0064", bankName = "İş Bankası", program = "maximum",
+                    brand = "visa", cardType = "credit", isCommercial = false,
+                },
+            },
+        }, ("X-Platform-Key", AdminKey));
+
+        await ActivateRuleAsync(tenant.ApiKey, new { strategy = "cheapest" });
+
+        // Garanti kartı: on-us %1,20 → Pahalı POS
+        var onUs = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY" }, ("X-Api-Key", tenant.ApiKey));
+        await SendOk<PaymentDto>(HttpMethod.Post, $"/v1/payments/{onUs.Id}/confirm",
+            new { bin = "540061" }, ("X-Api-Key", tenant.ApiKey));
+
+        // İş Bankası kartı: on-us yok → genel oranlar → Ucuz POS
+        var offUs = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY" }, ("X-Api-Key", tenant.ApiKey));
+        await SendOk<PaymentDto>(HttpMethod.Post, $"/v1/payments/{offUs.Id}/confirm",
+            new { bin = "450803" }, ("X-Api-Key", tenant.ApiKey));
+
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
+        var attempts = await db.PaymentAttempts.AsNoTracking()
+            .Join(db.PaymentIntents.AsNoTracking(), a => a.PaymentIntentId, i => i.Id,
+                (a, i) => new { i.PublicId, a.ConnectorAccountId })
+            .ToListAsync();
+
+        attempts.Single(a => a.PublicId == onUs.Id).ConnectorAccountId.ShouldBe(pahali.Id);
+        attempts.Single(a => a.PublicId == offUs.Id).ConnectorAccountId.ShouldBe(ucuz.Id);
+
+        // Gerekçe on-us oranını yazmalı: 100.000 kuruş × %1,20 = 1.200 kuruş = 12,00 ₺
+        (await RoutingResultAsync(tenant.TenantId, onUs.Id))
+            .GetProperty("reason").GetString().ShouldContain("12,00 ₺");
+    }
+
+    [Fact]
+    public async Task Kart_bilinmiyorsa_on_us_orani_uygulanmamali()
+    {
+        // Hosted akışta müşteri henüz kart girmemiş olabilir (bin gönderilmez). On-us
+        // varsayıp ucuz oran seçmek, rotayı gerçekte daha PAHALI olan POS'a yollardı.
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        await SendOk<object>(HttpMethod.Post, "/v1/recon/agreements",
+            new { connectorAccountId = pahali.Id, installmentCount = 1, rateBps = 120, valorDays = 1,
+                  bankCode = "0062" },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await ActivateRuleAsync(tenant.ApiKey, new { strategy = "cheapest" });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
+
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
+        (await db.PaymentAttempts.AsNoTracking().SingleAsync())
+            .ConnectorAccountId.ShouldBe(ucuz.Id); // genel oranlar: %1,80 < %3,20
+    }
+
+    [Fact]
+    public async Task Yurt_disi_kart_kurali_ulke_koduyla_eslesmeli()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        await SendOk<object>(HttpMethod.Post, "/v1/bins", new
+        {
+            bins = new[]
+            {
+                new
+                {
+                    bin = "411111", bankCode = "XXXX", bankName = "Yabancı Banka", program = "other",
+                    brand = "visa", cardType = "credit", isCommercial = false, country = "DE",
+                },
+            },
+        }, ("X-Platform-Key", AdminKey));
+
+        // Yurt dışı kart "Pahalı POS"a (e-ihracat hattı senaryosu); gerisi en ucuza
+        await ActivateRuleAsync(tenant.ApiKey, new
+        {
+            strategy = "cheapest",
+            rules = new[]
+            {
+                new
+                {
+                    name = "yurt-disi",
+                    when = new { fact = "card.country", op = "ne", value = "TR" },
+                    route = new[] { "Pahalı POS" },
+                    reason = "yurt dışı kart → e-ihracat hattı",
+                },
+            },
+        });
+
+        var payment = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor = 100_000, currency = "TRY" }, ("X-Api-Key", tenant.ApiKey));
+        await SendOk<PaymentDto>(HttpMethod.Post, $"/v1/payments/{payment.Id}/confirm",
+            new { bin = "411111" }, ("X-Api-Key", tenant.ApiKey));
+
+        await using var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId));
+        (await db.PaymentAttempts.AsNoTracking().SingleAsync())
+            .ConnectorAccountId.ShouldBe(pahali.Id);
+
+        (await RoutingResultAsync(tenant.TenantId, payment.Id))
+            .GetProperty("reason").GetString().ShouldContain("yurt dışı");
+
+        // Karar-anı kartına ülke de yazıldı — simülatör aynı kararı yeniden oynatabilsin
+        (await RoutingResultAsync(tenant.TenantId, payment.Id))
+            .GetProperty("card").GetProperty("country").GetString().ShouldBe("DE");
+    }
+
+
+    private sealed record CommitmentDto(
+        Guid Id, Guid ConnectorAccountId, long MonthlyTargetMinor, bool IsActive,
+        long AchievedMinor, long GapMinor, int DaysLeft);
+
+    [Fact]
+    public async Task Taahhut_acigi_olan_hesap_one_alinmali_acik_kapaninca_geri_dusmeli()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        // "Pahalı POS"a aylık 2.000,00 ₺ taahhüt. cheapest olsaydı hep Ucuz POS kazanırdı;
+        // taahhüt stratejisi açığı olan hesabı öne alır.
+        await SendOk<CommitmentDto>(HttpMethod.Post, "/v1/routing/commitments",
+            new { connectorAccountId = pahali.Id, monthlyTargetMinor = 2_000_00 },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await ActivateRuleAsync(tenant.ApiKey, new { strategy = "commitment" });
+
+        // İlk işlem: açık tam → Pahalı POS
+        var ilk = await PayAsync(tenant.ApiKey, 1_500_00);
+
+        await using (var db = _fixture.CreatePayments(PostgresFixture.TenantCtx(tenant.TenantId)))
+        {
+            var attempt = await db.PaymentAttempts.AsNoTracking()
+                .Join(db.PaymentIntents.AsNoTracking(), a => a.PaymentIntentId, i => i.Id,
+                    (a, i) => new { i.PublicId, a.ConnectorAccountId })
+                .SingleAsync(x => x.PublicId == ilk);
+            attempt.ConnectorAccountId.ShouldBe(pahali.Id);
+        }
+
+        (await RoutingResultAsync(tenant.TenantId, ilk))
+            .GetProperty("reason").GetString().ShouldContain("kalan 2.000,00 ₺");
+
+        // İlerleme uca da yansımalı
+        var afterFirst = (await SendOk<List<CommitmentDto>>(
+            HttpMethod.Get, "/v1/routing/commitments", null, ("X-Api-Key", tenant.ApiKey)))
+            .ShouldHaveSingleItem();
+        afterFirst.AchievedMinor.ShouldBe(1_500_00);
+        afterFirst.GapMinor.ShouldBe(500_00);
+
+        // İkinci işlem açığı kapatır (toplam 3.000 > 2.000 hedef)
+        await PayAsync(tenant.ApiKey, 1_500_00);
+
+        var afterSecond = (await SendOk<List<CommitmentDto>>(
+            HttpMethod.Get, "/v1/routing/commitments", null, ("X-Api-Key", tenant.ApiKey)))
+            .ShouldHaveSingleItem();
+        afterSecond.AchievedMinor.ShouldBe(3_000_00);
+        afterSecond.GapMinor.ShouldBe(0); // açık kapandı
+
+        // Artık aciliyet 0 → öncelik sırasına dönüldü ("Pahalı POS" priority=1 ile önde)
+        var ucuncu = await PayAsync(tenant.ApiKey, 100_00);
+        (await RoutingResultAsync(tenant.TenantId, ucuncu))
+            .GetProperty("reason").GetString().ShouldContain("açığı olan taahhüt yok");
+    }
+
+    [Fact]
+    public async Task Taahhut_pasife_cekilince_rotayi_etkilememeli_ama_silinmemeli()
+    {
+        var (tenant, ucuz, pahali) = await SeedAsync();
+
+        var commitment = await SendOk<CommitmentDto>(HttpMethod.Post, "/v1/routing/commitments",
+            new { connectorAccountId = pahali.Id, monthlyTargetMinor = 5_000_00 },
+            ("X-Api-Key", tenant.ApiKey));
+
+        await ActivateRuleAsync(tenant.ApiKey, new { strategy = "commitment" });
+
+        var deleted = await Send(HttpMethod.Delete, $"/v1/routing/commitments/{commitment.Id}", null,
+            ("X-Api-Key", tenant.ApiKey));
+        deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        var payment = await PayAsync(tenant.ApiKey, 1_000_00);
+        (await RoutingResultAsync(tenant.TenantId, payment))
+            .GetProperty("reason").GetString().ShouldContain("açığı olan taahhüt yok");
+
+        // Kayıt SİLİNMEDİ — geçmiş rota kararlarının gerekçesi burada durur (İlke 3)
+        await using var routing = _fixture.CreateRouting(PostgresFixture.TenantCtx(tenant.TenantId));
+        var row = await routing.VolumeCommitments.AsNoTracking().SingleAsync();
+        row.IsActive.ShouldBeFalse();
+        row.MonthlyTargetMinor.ShouldBe(5_000_00);
+    }
+
+    /// <summary>Gerçek ödeme: create → confirm → banka formu → callback (tahsil edilmiş olur).</summary>
+    private async Task<string> PayAsync(string apiKey, long amountMinor)
+    {
+        var created = await SendOk<PaymentDto>(HttpMethod.Post, "/v1/payments",
+            new { amountMinor, currency = "TRY", confirm = true }, ("X-Api-Key", apiKey));
+
+        created.NextAction.ShouldNotBeNull();
+        using var noRedirect = _factory.CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var callback = await noRedirect.PostAsync(created.NextAction!.Url,
+            new FormUrlEncodedContent(created.NextAction.Fields));
+        callback.IsSuccessStatusCode.ShouldBeTrue(await callback.Content.ReadAsStringAsync());
+
+        return created.Id;
+    }
+
 }

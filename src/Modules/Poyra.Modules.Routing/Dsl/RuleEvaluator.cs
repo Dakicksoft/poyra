@@ -24,6 +24,8 @@ public static class RuleEvaluator
     /// Kart sinyalleri yalnız BİLİNİYORSA torbaya girer: hosted akışta müşteri henüz
     /// kart girmemişken kartla ilgili kurallar eşleşmemeli, kural atlanıp bir sonrakine
     /// (ya da stratejiye) geçilmelidir.
+    /// Kanal da aynı kuraldadır: kanal alanı eklenmeden önceki kayıtlarda null gelir ve
+    /// kanal kuralları o işlemlerde eşleşmez (RuleFacts.Set boş değeri torbaya koymaz).
     /// </summary>
     private static RuleFacts ToFacts(RoutingFacts facts)
     {
@@ -34,15 +36,18 @@ public static class RuleEvaluator
             .Set("installments", (long)facts.Installments)
             .Set("hour", (long)facts.HourLocal)
             .Set("currency", facts.Currency)
+            .Set("channel", facts.Channel)
             .Set("bin", card?.Bin)
             .Set("card.bank", card?.BankCode)
             .Set("card.program", card?.Program)
             .Set("card.brand", card?.Brand)
             .Set("card.type", card?.CardType)
             .Set("card.commercial", card?.IsCommercial)
+            .Set("card.country", card?.Country)
             .Alias("bank_code", "card.bank")
             .Alias("program", "card.program")
             .Alias("brand", "card.brand")
-            .Alias("card_type", "card.type");
+            .Alias("card_type", "card.type")
+            .Alias("country", "card.country");
     }
 }

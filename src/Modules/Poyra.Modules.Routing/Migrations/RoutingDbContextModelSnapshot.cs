@@ -73,6 +73,49 @@ namespace Poyra.Modules.Routing.Migrations
 
                     b.ToTable("routing_rules", (string)null);
                 });
+
+            modelBuilder.Entity("Poyra.Modules.Routing.Domain.VolumeCommitment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ConnectorAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("connector_account_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<long>("MonthlyTargetMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("monthly_target_minor");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_volume_commitments");
+
+                    b.HasIndex("TenantId", "ConnectorAccountId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_volume_commitments_tenant_id_connector_account_id");
+
+                    b.ToTable("volume_commitments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_volume_commitments_target", "monthly_target_minor > 0");
+                        });
+                });
 #pragma warning restore 612, 618
         }
     }

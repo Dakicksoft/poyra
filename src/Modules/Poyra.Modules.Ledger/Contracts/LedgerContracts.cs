@@ -3,6 +3,10 @@ namespace Poyra.Modules.Ledger.Contracts;
 /// <summary>Deftere yazılacak tahsilat — ödeme modülünün defterin anladığı dile çevrilmiş hâli.</summary>
 /// <param name="AttemptPublicId">att_… — bankaya giden sipariş no; alacağın tekil anahtarı.</param>
 /// <param name="GrossMinor">Karttan ÇEKİLEN tutar (vade farkı dahil).</param>
+/// <param name="CardBank">
+/// Kartı çıkaran banka kodu — bankaya özel (on-us) anlaşmayı seçebilmek için. Denemede
+/// kaydedilmemişse null; o hâlde genel oran uygulanır.
+/// </param>
 public sealed record CapturedCharge(
     string AttemptPublicId,
     string? PaymentPublicId,
@@ -10,7 +14,8 @@ public sealed record CapturedCharge(
     long GrossMinor,
     string Currency,
     int Installments,
-    DateTimeOffset CapturedAtServer);
+    DateTimeOffset CapturedAtServer,
+    string? CardBank = null);
 
 /// <summary>
 /// Defterin tahsilat kaynağı. <b>Port BURADA tanımlıdır</b> (bağımlılığın tersine
@@ -41,7 +46,13 @@ public sealed record CommissionTerm(int RateBps, int ValorDays);
 /// </summary>
 public interface ICommissionTerms
 {
-    Task<CommissionTerm?> FindAsync(Guid connectorAccountId, int installments, CancellationToken ct);
+    /// <param name="cardBank">
+    /// Kartı çıkaran banka kodu — bankaya özel (on-us) anlaşma varsa o, yoksa genel anlaşma.
+    /// Rota motoru ve ekstre denetimi de AYNI seçimi yapar; ayrışsalardı defter bankadan
+    /// yanlış tutar bekler ve denetim bankayı haksız yere suçlardı.
+    /// </param>
+    Task<CommissionTerm?> FindAsync(
+        Guid connectorAccountId, int installments, string? cardBank, CancellationToken ct);
 }
 
 /// <summary>

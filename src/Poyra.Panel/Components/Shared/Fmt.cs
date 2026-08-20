@@ -1,5 +1,6 @@
 using System.Globalization;
 using Poyra.Modules.Payments.Domain;
+using Poyra.Modules.Routing.Contracts;
 
 namespace Poyra.Panel.Components;
 
@@ -36,6 +37,19 @@ public static class Fmt
         Poyra.Modules.Payments.Domain.PaymentStatus.Cancelled => "İptal",
         Poyra.Modules.Payments.Domain.PaymentStatus.Expired => "Süresi doldu",
         _ => status.ToString(),
+    };
+
+    /// <summary>
+    /// Ödemenin Poyra'ya girdiği kanal. Boş dönerse satır hiç basılmaz: kanal alanı
+    /// eklenmeden önceki ödemelerde bu bilgi YOKTUR ve uydurulmaz.
+    /// </summary>
+    public static string Channel(string? channel) => channel switch
+    {
+        PaymentChannels.Api => "API",
+        PaymentChannels.Link => "Ödeme linki",
+        PaymentChannels.Field => "Saha tahsilatı",
+        PaymentChannels.Subscription => "Abonelik yenilemesi",
+        _ => "",
     };
 
     public static string StatusClass(PaymentStatus status) => status switch

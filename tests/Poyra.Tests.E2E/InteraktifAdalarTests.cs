@@ -43,6 +43,41 @@ public sealed class InteraktifAdalarTests(PoyraAppFixture uygulama, ITestOutputH
     }
 
     [Fact]
+    public async Task Olcum_kotasi_alani_yalniz_olculen_sinyalli_stratejilerde_gorunur()
+    {
+        var (isyeri, eposta) = await Uygulama.IsyeriKurAsync("E2E Kota");
+        await GirisYapAsync(eposta, isyeri.Slug);
+
+        await Sayfa.GotoAsync($"{Uygulama.PanelAdres}/rota");
+        await Assertions.Expect(Sayfa.GetByText("Aktif kural yok")).ToBeVisibleAsync();
+
+        // Önce devrenin kurulduğunu KANITLA: statik SSR select'i zaten basar, ama hidrasyon
+        // bitmeden seçim yapmak olayı boşluğa gönderir (sunucu hiç haberdar olmaz) ve test
+        // "alan görünmedi" diye yanlış yerden kırılır. Kip düğmesi sunucuda koşan bir
+        // @onclick — JSON alanı geldiyse devre canlıdır. Geri dönüş ayrıca JSON gidiş-dönüşünü
+        // de sınar: kota alanı ToJson/FromJson'da düşerse burada yakalanır.
+        await Sayfa.GetByRole(AriaRole.Button, new() { Name = "JSON" }).ClickAsync();
+        await Assertions.Expect(Sayfa.GetByLabel("Kural (JSON)")).ToBeVisibleAsync();
+        await Sayfa.GetByRole(AriaRole.Button, new() { Name = "Görsel kurucu" }).ClickAsync();
+
+        var strateji = Sayfa.GetByLabel("Kural eşleşmezse");
+        await Assertions.Expect(strateji).ToBeVisibleAsync();
+
+        // Varsayılan taslak "cheapest" — anlaşma oranı trafikten beslenmez, kota gizli
+        var kota = Sayfa.GetByLabel("Ölçüm kotası (%)");
+        await Assertions.Expect(kota).ToBeHiddenAsync();
+
+        // Ölçülen sinyale geçince alan açılmalı ve varsayılan kotayı taşımalı
+        await strateji.SelectOptionAsync("best_success");
+        await Assertions.Expect(kota).ToBeVisibleAsync();
+        await Assertions.Expect(kota).ToHaveValueAsync("10");
+
+        // Anlaşma oranına dayanan stratejide yeniden gizlenmeli
+        await strateji.SelectOptionAsync("cheapest");
+        await Assertions.Expect(kota).ToBeHiddenAsync();
+    }
+
+    [Fact]
     public async Task Canli_akis_yeni_odemeyi_sayfa_yenilenmeden_gosterir()
     {
         var (isyeri, eposta) = await Uygulama.IsyeriKurAsync("E2E Canlı");
