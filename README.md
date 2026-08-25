@@ -595,6 +595,19 @@ docker compose -f docker-compose.prod.yml up -d
 - TLS bilinçli olarak kompozisyon dışındadır: üç host 127.0.0.1:8080'de dinler; önüne
   Caddy/nginx/Traefik koyup üç alan adına sertifika bağlarsınız.
 - Kurumsal kurulumda `.env` yerine Docker secrets / Vault / KMS kullanın — PCI bunu ister.
+- **pgweb** kompozisyona dahildir (`pgweb` servisi, port 8081). Sahip rolle ve **yazma
+  yetkisiyle** bağlanır; o rol superuser olduğu için RLS'i — FORCE olanlar dahil — aşar,
+  yani tüm işyerlerinin verisini görür ve değiştirebilir. HTTP basic auth zorunludur
+  (`PGWEB_USER`/`PGWEB_PASSWORD` tanımsızsa yığın açılmaz) ve `--lock-session` ile arayüz
+  başka veritabanlarına bağlanamaz. **İnternete açacaksanız** ayrıca IP kısıtı koymayı
+  ya da yalnız gerektiğinde ayağa kaldırmayı değerlendirin.
+
+**Dokploy / Coolify gibi Traefik tabanlı PaaS'lerde** kaynaktan derlemeye gerek yok:
+[docker-compose.dokploy.yml](docker-compose.dokploy.yml) GHCR'daki yayımlanmış imajları
+çeker. Compose servisi olarak yapıştırın (Raw) ya da Git sağlayıcısıyla bağlayın — dosya
+kendi kendine yeter, hiçbir dosya bağlaması gerektirmez. Alan adlarını `api` / `panel` /
+`checkout` servislerine 8080 portundan verin; TLS'i ters vekil yerine Traefik üstlenir.
+Yükseltme tek satırdır: `POYRA_SURUM` değişir, yeniden dağıtılır.
 
 ## Geliştirme rehberi
 

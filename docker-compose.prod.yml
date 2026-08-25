@@ -1,4 +1,4 @@
-# Poyra — self-host üretim kompozisyonu.
+# Poyra — self-host üretim compose dosyası.
 #
 # Kullanım:
 #   cp .env.example .env && ./scripts/anahtar-uret.sh >> .env   # sırları üret
@@ -42,7 +42,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-poyra}
       POYRA_APP_PASSWORD: ${POYRA_APP_PASSWORD:?zorunlu}
     volumes:
-      - poyra_prod_pgdata:/var/lib/postgresql/data
+      - poyra_prod_pgdata:/var/lib/postgresql
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U poyra -d ${POSTGRES_DB:-poyra}"]
@@ -50,6 +50,32 @@ services:
       timeout: 5s
       retries: 12
     # ports YOK: veritabanı yalnız iç ağdan erişilir
+
+  # poyra_app parolasını HER dağıtımda eşitler.
+  #
+  # initdb betikleri YALNIZ birim boşken koşar. Parola sonradan değişirse (anahtar
+  # yenileme, ilk denemeden kalan birim) veritabanındaki ESKİ parola olduğu yerde kalır
+  # ve uygulama 28P01 ile bağlanamaz. Üstelik bu açılışı engellemez: DatabaseRoleGuard
+  # bağlantı hatasını yutar, uygulama ayakta ama veritabanısız çalışır.
+  # Bu iş, initdb'nin koşup koşmadığından bağımsız olarak parolayı env'e eşitler.
+  rol-parolasi:
+    image: postgres:18-alpine
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGUSER: poyra                              # sahip rol — ALTER ROLE yetkisi onda
+      PGPASSWORD: ${POSTGRES_PASSWORD:?zorunlu}
+      PGDATABASE: ${POSTGRES_DB:-poyra}
+      POSTGRES_USER: poyra                       # betiğin kendi beklediği değişkenler
+      POSTGRES_DB: ${POSTGRES_DB:-poyra}
+      POYRA_APP_PASSWORD: ${POYRA_APP_PASSWORD:?zorunlu}
+    volumes:
+      # initdb ile AYNI betik — ikinci bir kopya tutmuyoruz
+      - ./docker/initdb:/initdb:ro
+    entrypoint: ["sh", "/initdb/02-app-role-password.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Migration'lar AYRI bir işte koşar ve biter. Uygulama açılışında migrate etmek,
   # birden çok kopya aynı anda kalkarken yarışa ve yarım şemaya yol açar.
@@ -63,8 +89,8 @@ services:
       Database__AutoMigrate: "true"
       Poyra__MigrateOnly: "true"
     depends_on:
-      postgres:
-        condition: service_healthy
+      rol-parolasi:
+        condition: service_completed_successfully
 
   api:
     build:
@@ -79,12 +105,8 @@ services:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:${API_PORT:-5080}:8080"   # yalnız localhost; dışarıya reverse proxy açar
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/ready || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # healthcheck BURADA TANIMLI DEĞİL: imajın kendisi taşıyor (src/Poyra.Api/Dockerfile).
+    # Böylece Dokploy/Swarm gibi bu dosyayı kullanmayan ortamlar da yoklamayı kazanır.
 
   panel:
     build:
@@ -111,6 +133,32 @@ services:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:${CHECKOUT_PORT:-5095}:8080"
+
+  # Veritabanı gezgini — DIŞARIYA AÇIK.
+  #
+  # Sahip rol `poyra` ile bağlanır ve YAZMA AÇIKTIR (bilinçli tercih). O rol postgres
+  # imajında superuser'dır, yani RLS'i — FORCE olanlar dahil — aşar: tüm işyerlerinin
+  # verisi tek ekranda görünür ve DEĞİŞTİRİLEBİLİR.
+  #
+  # Bu yüzden iki kilit zorunlu tutuluyor:
+  #   * HTTP basic auth — PGWEB_USER/PGWEB_PASSWORD tanımsızsa yığın hiç açılmaz.
+  #   * --lock-session — pgweb normalde kullanıcıya "bağlantı dizesi gir" ekranı açar;
+  #     bu bayrak olmadan arayüz, ağdaki BAŞKA veritabanlarına atlamak için kullanılabilir.
+  pgweb:
+    image: sosedoff/pgweb:0.17.0
+    restart: unless-stopped
+    environment:
+      # Parolada URL'de anlamlı karakter olmamalı (@ : / ?); anahtar-uret.sh zaten temizliyor.
+      PGWEB_DATABASE_URL: "postgres://poyra:${POSTGRES_PASSWORD:?zorunlu}@postgres:5432/${POSTGRES_DB:-poyra}?sslmode=disable"
+      PGWEB_AUTH_USER: ${PGWEB_USER:?zorunlu}
+      PGWEB_AUTH_PASS: ${PGWEB_PASSWORD:?zorunlu}
+    # Entrypoint zaten --bind=0.0.0.0 --listen=8081 içeriyor; buraya eklenenler ona eklenir.
+    command: ["--lock-session"]
+    depends_on:
+      postgres:
+        condition: service_healthy   # migrate'i BEKLEMEZ: şema bozuksa da açılıp bakılabilmeli
+    ports:
+      - "127.0.0.1:${PGWEB_PORT:-5099}:8081"   # yalnız localhost; dışarıya ters vekil açar
 
 volumes:
   poyra_prod_pgdata:
