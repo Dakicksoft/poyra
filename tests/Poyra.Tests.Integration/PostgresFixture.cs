@@ -94,6 +94,14 @@ public sealed class PostgresFixture : IAsyncLifetime
         => new(PoyraDb.BuildOptions<Poyra.Modules.Ledger.LedgerDbContext>(
             AppCs, Poyra.Modules.Ledger.LedgerDbContext.MigrationsHistoryTable, tenant, _clock), tenant);
 
+    public Poyra.Modules.Webhooks.WebhooksDbContext CreateWebhooks(TenantContext tenant)
+        => new(PoyraDb.BuildOptions<Poyra.Modules.Webhooks.WebhooksDbContext>(
+            AppCs, Poyra.Modules.Webhooks.WebhooksDbContext.MigrationsHistoryTable, tenant, _clock), tenant);
+
+    public Poyra.Modules.PaymentLinks.PaymentLinksDbContext CreatePaymentLinks(TenantContext tenant)
+        => new(PoyraDb.BuildOptions<Poyra.Modules.PaymentLinks.PaymentLinksDbContext>(
+            AppCs, Poyra.Modules.PaymentLinks.PaymentLinksDbContext.MigrationsHistoryTable, tenant, _clock), tenant);
+
     public static TenantContext TenantCtx(Guid tenantId)
     {
         var context = new TenantContext();

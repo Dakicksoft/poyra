@@ -2,12 +2,21 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Poyra.Connectors.NestPay;
+using Poyra.Modules.Connectors;
+using Poyra.Modules.Connectors.Domain;
 using Poyra.Modules.Customers;
 using Poyra.Modules.Customers.Domain;
+using Poyra.Modules.PaymentLinks;
+using Poyra.Modules.PaymentLinks.Domain;
 using Poyra.Modules.Payments;
 using Poyra.Modules.Payments.Domain;
 using Poyra.Modules.Tenancy;
+using Poyra.Modules.Routing;
+using Poyra.Modules.Routing.Domain;
 using Poyra.Modules.Tenancy.Features.CreateTenant;
+using Poyra.Modules.Webhooks;
+using Poyra.Modules.Webhooks.Domain;
 using Poyra.Persistence;
 using Poyra.SharedKernel.Cqrs;
 using Poyra.SharedKernel.Domain;
@@ -60,7 +69,82 @@ public static class DemoDataWriter
         await WriteCustomersAndPaymentsAsync(
             services, tenant.TenantId, tenant.ProfileId, cancellationToken);
 
-        logger.LogInformation("Demo müşteri ve ödeme verisi yazıldı.");
+        await WriteConnectorAndRulesAsync(services, tenant.TenantId, cancellationToken);
+
+        logger.LogInformation("Demo müşteri, ödeme ve bağlantı verisi yazıldı.");
+    }
+
+    /// <summary>Rota kuralının yönlendirdiği POS etiketi — ikisi aynı olmak zorunda.</summary>
+    private const string DemoConnectorLabel = "Demo POS (test)";
+
+    /// <summary>
+    /// POS bağlantısı, rota kuralı, ödeme linki ve webhook ucu — panelin ilgili
+    /// ekranları boş açılmasın diye. Bağlantıda GERÇEK banka kimliği yoktur:
+    /// kimlik alanı boş, TestMode açık.
+    /// </summary>
+    private static async Task WriteConnectorAndRulesAsync(
+        IServiceProvider services, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var connectorsDb = services.GetRequiredService<ConnectorsDbContext>();
+        connectorsDb.ConnectorAccounts.Add(new ConnectorAccount
+        {
+            TenantId = tenantId,
+            ConnectorKey = NestPayConnector.ConnectorKey,
+            Label = DemoConnectorLabel,
+            CredentialsEncrypted = [],   // demo: gerçek kimlik yok
+            TestMode = true,
+            Priority = 100,
+        });
+        await connectorsDb.SaveChangesAsync(cancellationToken);
+
+        // Belge RuleDocument şemasıdır (src/Modules/Poyra.Modules.Routing/Dsl/RuleDocument.cs).
+        // Hesaplar etiketle referanslanır, o yüzden DemoConnectorLabel ile birebir aynı.
+        var routingDb = services.GetRequiredService<RoutingDbContext>();
+        routingDb.RoutingRules.Add(new RoutingRule
+        {
+            TenantId = tenantId,
+            Name = "Demo rota",
+            IsActive = true,
+            Document = $$"""
+                {
+                  "rules": [
+                    {
+                      "name": "Yüksek tutar",
+                      "when": { "all": [ { "fact": "amount_minor", "op": "gte", "value": 100000 } ] },
+                      "route": ["{{DemoConnectorLabel}}"],
+                      "reason": "yüksek tutar → {{DemoConnectorLabel}}"
+                    }
+                  ],
+                  "strategy": "priority",
+                  "fallback": ["{{DemoConnectorLabel}}"],
+                  "guards": { "skipUnhealthy": true, "maxAttempts": 2 }
+                }
+                """,
+        });
+        await routingDb.SaveChangesAsync(cancellationToken);
+
+        var linksDb = services.GetRequiredService<PaymentLinksDbContext>();
+        linksDb.PaymentLinks.Add(new PaymentLink
+        {
+            TenantId = tenantId,
+            Slug = PaymentLink.NewSlug(),
+            Description = "Demo ürün — tek çekim",
+            AmountMinor = 49900,
+            MaxInstallments = 3,
+            MaxUsage = 0,   // sınırsız
+        });
+        await linksDb.SaveChangesAsync(cancellationToken);
+
+        var webhooksDb = services.GetRequiredService<WebhooksDbContext>();
+        webhooksDb.WebhookEndpoints.Add(new WebhookEndpoint
+        {
+            TenantId = tenantId,
+            Url = "https://ornek.test/poyra/webhook",
+            EventTypes = ["payment.succeeded", "payment.failed"],
+            SecretEncrypted = [],
+            Active = true,
+        });
+        await webhooksDb.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Poyra.Api;
 using Poyra.Api.Database;
 using Poyra.Modules.Payments.Domain;
+using Poyra.Modules.Routing.Dsl;
 using Poyra.Modules.Tenancy;
 using Poyra.Modules.Tenancy.Domain;
 using Poyra.Persistence;
@@ -112,6 +113,38 @@ public sealed class DemoSeedTests : IDisposable
         // Son 30 güne yayılmış olmalı: pano grafiği tek güne yığılmasın.
         all.Select(x => x.CreatedAt.UtcDateTime.Date).Distinct().Count()
             .ShouldBeGreaterThanOrEqualTo(5);
+    }
+
+    [Fact]
+    public async Task Pos_baglantisi_rota_kurali_odeme_linki_ve_webhook_yazmali()
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var options = Options();
+
+        await DemoDataWriter.WriteAsync(
+            scope.ServiceProvider, options, NullLogger.Instance, CancellationToken.None);
+
+        var tenantId = await scope.ServiceProvider.GetRequiredService<TenancyDbContext>()
+            .Tenants.Where(t => t.Slug == options.TenantSlug).Select(t => t.Id).SingleAsync();
+        var ctx = PostgresFixture.TenantCtx(tenantId);
+
+        await using var connectors = _fixture.CreateConnectors(ctx);
+        (await connectors.ConnectorAccounts.CountAsync()).ShouldBe(1);
+
+        await using var routing = _fixture.CreateRouting(ctx);
+        var rule = await routing.RoutingRules.SingleAsync();
+        rule.IsActive.ShouldBeTrue();
+
+        // Belge motorun GERÇEK şemasına uymalı — yoksa panelde açılmaz.
+        RuleDocument.Parse(rule.Document).Rules.ShouldNotBeEmpty();
+
+        await using var links = _fixture.CreatePaymentLinks(ctx);
+        (await links.PaymentLinks.CountAsync()).ShouldBe(1);
+
+        await using var webhooks = _fixture.CreateWebhooks(ctx);
+        var endpoint = await webhooks.WebhookEndpoints.SingleAsync();
+        endpoint.Active.ShouldBeTrue();
+        endpoint.EventTypes.ShouldNotBeEmpty();
     }
 
     [Fact]

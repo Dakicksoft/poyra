@@ -811,7 +811,7 @@ git commit -m "feat(api): demo müşteri ve ödeme verisi"
 `ConnectorAccount.CredentialsEncrypted` boş bırakılır ve `TestMode = true` olur — demo
 kurulumunda gerçek banka kimliği yoktur, bağlantı yalnız panelde görünsün diye vardır.
 
-- [ ] **Adım 1: Başarısız testi ekle**
+- [x] **Adım 1: Başarısız testi ekle**
 
 `tests/Poyra.Tests.Integration/DemoSeedTests.cs` içine ekle:
 
@@ -849,14 +849,14 @@ kurulumunda gerçek banka kimliği yoktur, bağlantı yalnız panelde görünsü
     }
 ```
 
-- [ ] **Adım 2: Testi koş, başarısız olduğunu doğrula**
+- [x] **Adım 2: Testi koş, başarısız olduğunu doğrula**
 
 Çalıştır: `dotnet test tests/Poyra.Tests.Integration --filter "FullyQualifiedName~Pos_baglantisi"`
 
 Beklenen: `error CS1061: 'PostgresFixture' 'CreatePaymentLinks' tanımı içermiyor`
 (fikstürde `CreateWebhooks` ve `CreatePaymentLinks` yok).
 
-- [ ] **Adım 3: Fikstüre eksik iki bağlamı ekle**
+- [x] **Adım 3: Fikstüre eksik iki bağlamı ekle**
 
 `tests/Poyra.Tests.Integration/PostgresFixture.cs` içine, diğer `Create*` metodlarının yanına:
 
@@ -872,7 +872,7 @@ Beklenen: `error CS1061: 'PostgresFixture' 'CreatePaymentLinks' tanımı içermi
 
 Bu, dosyadaki mevcut `CreateTenancy` / `CreatePayments` deseniyle birebir aynıdır.
 
-- [ ] **Adım 4: Kalan satırları yaz**
+- [x] **Adım 4: Kalan satırları yaz**
 
 `src/Poyra.Api/Database/DemoDataWriter.cs` içinde `WriteCustomersAndPaymentsAsync` çağrısının
 ALTINA ekle:
@@ -957,19 +957,19 @@ using Poyra.Modules.Webhooks.Domain;
 DbContext kaydı GEREKMEZ: `WebApplicationFactory` kapsamı bu dört bağlamı da sağlıyor.
 Fikstüre eklenen `CreateWebhooks` / `CreatePaymentLinks` yalnız DOĞRULAMA sorguları için.
 
-- [ ] **Adım 5: Testleri koş, geçtiğini doğrula**
+- [x] **Adım 5: Testleri koş, geçtiğini doğrula**
 
 Çalıştır: `dotnet test tests/Poyra.Tests.Integration --filter "FullyQualifiedName~DemoSeedTests"`
 
 Beklenen: `Başarılı! - Başarısız: 0, Başarılı: 4`
 
-- [ ] **Adım 6: Tüm süiti koş**
+- [x] **Adım 6: Tüm süiti koş**
 
 Çalıştır: `./scripts/test-hizli.sh && dotnet test tests/Poyra.Tests.Integration`
 
 Beklenen: allnde `Başarısız: 0`.
 
-- [ ] **Adım 7: README'ye demo bölümünü ekle**
+- [x] **Adım 7: README'ye demo bölümünü ekle**
 
 `README.md` içinde "Üretim kurulumu (self-host)" bölümündeki madde listesinin sonuna ekle:
 
@@ -981,7 +981,7 @@ Beklenen: allnde `Başarısız: 0`.
   kurulum kirlenmez. Demoyu tazelemek = veritabanı birimini silip yeniden dağıtmak.
 ```
 
-- [ ] **Adım 8: Commit**
+- [x] **Adım 8: Commit**
 
 ```bash
 git add src/Poyra.Api/Database/DemoDataWriter.cs tests/Poyra.Tests.Integration/DemoSeedTests.cs tests/Poyra.Tests.Integration/PostgresFixture.cs README.md

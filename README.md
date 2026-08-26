@@ -595,6 +595,12 @@ docker compose -f docker-compose.prod.yml up -d
 - TLS bilinçli olarak kompozisyon dışındadır: üç host 127.0.0.1:8080'de dinler; önüne
   Caddy/nginx/Traefik koyup üç alan adına sertifika bağlarsınız.
 - Kurumsal kurulumda `.env` yerine Docker secrets / Vault / KMS kullanın — PCI bunu ister.
+- **Demo verisi:** `POYRA_DEMO=true` ve veritabanında HİÇ işyeri yoksa açılışta örnek veri
+  kurulur — işyeri, `POYRA_DEMO_EMAIL`/`POYRA_DEMO_PASSWORD` ile giriş yapan kullanıcı, beş
+  müşteri, son 30 güne yayılmış 24 ödeme, bir POS bağlantısı, rota kuralı, ödeme linki ve
+  webhook ucu. Bir tane bile işyeri varsa hiçbir şey yazılmaz; bayrak açık unutulsa da
+  gerçek bir kurulum kirlenmez. Demoyu tazelemek = veritabanı birimini silip yeniden
+  dağıtmak (silme kodu bilerek yazılmadı).
 - **pgweb** kompozisyona dahildir (`pgweb` servisi, port 8081). Sahip rolle ve **yazma
   yetkisiyle** bağlanır; o rol superuser olduğu için RLS'i — FORCE olanlar dahil — aşar,
   yani tüm işyerlerinin verisini görür ve değiştirebilir. HTTP basic auth zorunludur
