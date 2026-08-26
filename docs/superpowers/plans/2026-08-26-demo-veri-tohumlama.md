@@ -515,7 +515,7 @@ girilir. Görev 4 ve 5 yalnız veri zenginleştirir.
 - Tüketir: Görev 1'den `DemoSeedOptions`/`DemoDataSeeder`, Görev 2'den `DemoDataWriter`.
 - Üretir: `DemoDataWriter.RunLockedAsync(string connectionString, Func<Task> is, CancellationToken) → Task`.
 
-- [ ] **Adım 1: Kilit yardımcısını yaz**
+- [x] **Adım 1: Kilit yardımcısını yaz**
 
 `src/Poyra.Api/Database/DemoDataWriter.cs` içine, sınıfın sonuna ekle:
 
@@ -553,7 +553,7 @@ girilir. Görev 4 ve 5 yalnız veri zenginleştirir.
 
 Dosyanın başına ekle: `using Npgsql;`
 
-- [ ] **Adım 2: `Program.cs`'e kancayı ekle**
+- [x] **Adım 2: `Program.cs`'e kancayı ekle**
 
 `src/Poyra.Api/Program.cs` içinde şu satırı bul:
 
@@ -582,13 +582,13 @@ if (demoOptions.Enabled)
 }
 ```
 
-- [ ] **Adım 3: Derlendiğini ve mevcut testlerin bozulmadığını doğrula**
+- [x] **Adım 3: Derlendiğini ve mevcut testlerin bozulmadığını doğrula**
 
 Çalıştır: `./scripts/test-hizli.sh`
 
 Beklenen: iki proje de `Başarısız: 0`.
 
-- [ ] **Adım 4: Compose dosyalarına değişkenleri ekle — YALNIZ `api` servisine**
+- [x] **Adım 4: Compose dosyalarına değişkenleri ekle — YALNIZ `api` servisine**
 
 `docker-compose.dokploy.yml` içinde `api` servisinin `environment` bloğunu şöyle yap:
 
@@ -604,7 +604,7 @@ Beklenen: iki proje de `Başarısız: 0`.
 
 `docker-compose.prod.yml` içinde `api` servisinin `environment` bloğuna aynı üç satırı ekle.
 
-- [ ] **Adım 5: Compose'ların geçerli olduğunu doğrula**
+- [x] **Adım 5: Compose'ların geçerli olduğunu doğrula**
 
 ```bash
 docker compose -f docker-compose.dokploy.yml config -q && docker compose -f docker-compose.prod.yml config -q && echo GECERLI
@@ -612,7 +612,7 @@ docker compose -f docker-compose.dokploy.yml config -q && docker compose -f dock
 
 Beklenen: `GECERLI` (gerekli değişkenleri taşıyan bir `--env-file` ile koşun).
 
-- [ ] **Adım 6: Commit**
+- [x] **Adım 6: Commit**
 
 ```bash
 git add src/Poyra.Api/Program.cs src/Poyra.Api/Database/DemoDataWriter.cs docker-compose.dokploy.yml docker-compose.prod.yml

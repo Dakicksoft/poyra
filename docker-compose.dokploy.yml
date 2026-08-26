@@ -97,6 +97,10 @@ services:
     environment:
       <<: *app-env
       Database__AutoMigrate: "false"    # şemayı migrate işi kurar
+      # Demo verisi yalnız API'yi ilgilendirir: panel ve checkout demo parolasını görmez.
+      Poyra__Demo__Enabled: ${POYRA_DEMO:-false}
+      Poyra__Demo__Email: ${POYRA_DEMO_EMAIL:-}
+      Poyra__Demo__Password: ${POYRA_DEMO_PASSWORD:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
