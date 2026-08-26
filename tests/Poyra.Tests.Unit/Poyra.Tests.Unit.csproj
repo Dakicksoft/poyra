@@ -10,7 +10,7 @@
     <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Recon\Poyra.Modules.Recon.csproj" />
     <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Vault\Poyra.Modules.Vault.csproj" />
     <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Subscriptions\Poyra.Modules.Subscriptions.csproj" />
-    <ProjectReference Include="..\..\src\Poyra.Api\Poyra.Api.csproj" />
+    <ProjectReference Include="..\..\src\Poyra.Persistence\Poyra.Persistence.csproj" />
     <ProjectReference Include="..\..\src\Poyra.Panel\Poyra.Panel.csproj" />
     <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.NestPay\Poyra.Connectors.NestPay.csproj" />
     <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Gvp\Poyra.Connectors.Gvp.csproj" />

@@ -18,8 +18,12 @@ Testcontainers (entegrasyon)
 
 ## Global Kısıtlar
 
-- Yorumlar, günlük mesajları ve test adları **Türkçe** — deponun mevcut düzeni.
-- Test adları alt çizgili Türkçe cümle: `Bayrak_kapaliyken_hic_dokunmamali`.
+- **Adlandırma:** metod adları, değişken adları, parametreler ve enum değerleri
+  **İngilizce**. Yorumlar, XML belgeleri, günlük mesajları ve demo içeriği (müşteri
+  adları, açıklamalar) **Türkçe**.
+- **Tek istisna — test ADLARI Türkçe kalır:** davranış açıklaması işlevi görürler ve
+  repodaki 795 birim testi bu düzende. Test gövdeleri ve yardımcıları İngilizce'dir.
+  Örnek: `public async Task Bayrak_kapaliyken_hic_dokunmamali()` içinde `var touched = false;`.
 - Birim testleri **Docker istemez**; gerçek Postgres gerektiren her şey entegrasyon projesine gider.
 - Commit mesajları Conventional Commits + Türkçe: `feat(api): …`, `test(api): …`.
 - **Co-Authored-By satırı EKLENMEZ.**
@@ -28,13 +32,20 @@ Testcontainers (entegrasyon)
 - Tohumlayıcı asla açılışı düşürmez: her hata yakalanır, uyarı olarak günlüğe yazılır.
 - Uygulama veritabanına `poyra_app` rolüyle bağlanır (RLS'e tabi). Tohumlama da bu rolle
   yazar — ayrıcalıklı bir yola sapılmaz.
+- **`Poyra.Tests.Unit` projesine `Poyra.Api` referansı EKLENMEZ.** Test projesi zaten
+  `Poyra.Panel`'e bağlı; ikinci bir host projesi eklenince iki `appsettings.json` aynı
+  çıktı dosyasına kopyalanmaya çalışıyor ve derleme MSB3021 ile kırılıyor. Bu yüzden
+  karar mantığı (`DemoSeedOptions`, `DemoSeedOutcome`, `DemoDataSeeder`) modül bağımlılığı
+  olmayan `Poyra.Persistence`'ta durur; modülleri tanıyan `DemoDataWriter` `Poyra.Api`'de
+  kalır ve yalnız entegrasyon testinden çağrılır. Aynı sebeple `DatabaseRoleGuard` da
+  bu oturumda `Poyra.Persistence`'a taşındı.
 
 ## Dosya Yapısı
 
 | Dosya | Sorumluluk |
 |---|---|
-| `src/Poyra.Api/Database/DemoSeedOptions.cs` (yeni) | Ayar kaydı + sonuç enum'u. Bağımlılığı yok. |
-| `src/Poyra.Api/Database/DemoDataSeeder.cs` (yeni) | Karar mantığı + kilit + sıralama. Veri yazmaz. |
+| `src/Poyra.Persistence/DemoSeedOptions.cs` (yeni) | Ayar kaydı + sonuç enum'u. Bağımlılığı yok. |
+| `src/Poyra.Persistence/DemoDataSeeder.cs` (yeni) | Karar mantığı + kilit + sıralama. Veri yazmaz. |
 | `src/Poyra.Api/Database/DemoDataWriter.cs` (yeni) | Asıl satırları yazar; modül modül bölünmüş. |
 | `src/Poyra.Api/Program.cs` (değişir) | Açılış kancası. |
 | `.env.example`, `scripts/anahtar-uret.sh` (değişir) | Ayar yüzeyi. |
@@ -50,8 +61,8 @@ veritabanı olmadan birim testiyle sınanır; yazma tarafı entegrasyon testine 
 ### Görev 1: Ayar yüzeyi ve karar mantığı
 
 **Dosyalar:**
-- Oluştur: `src/Poyra.Api/Database/DemoSeedOptions.cs`
-- Oluştur: `src/Poyra.Api/Database/DemoDataSeeder.cs`
+- Oluştur: `src/Poyra.Persistence/DemoSeedOptions.cs`
+- Oluştur: `src/Poyra.Persistence/DemoDataSeeder.cs`
 - Test: `tests/Poyra.Tests.Unit/DemoDataSeederTests.cs`
 - Değiştir: `.env.example`
 - Değiştir: `scripts/anahtar-uret.sh`
@@ -67,7 +78,7 @@ veritabanı olmadan birim testiyle sınanır; yazma tarafı entegrasyon testine 
 
 ```csharp
 using Microsoft.Extensions.Logging.Abstractions;
-using Poyra.Api.Database;
+using Poyra.Persistence;
 using Shouldly;
 using Xunit;
 
@@ -75,30 +86,30 @@ namespace Poyra.Tests.Unit;
 
 public sealed class DemoDataSeederTests
 {
-    private static DemoSeedOptions Gecerli() => new()
+    private static DemoSeedOptions Valid() => new()
     {
         Enabled = true,
         Email = "demo@poyra.test",
         Password = "cok-uzun-demo-parolasi",
     };
 
-    private static Task<DemoSeedOutcome> Kos(
-        DemoSeedOptions ayarlar, bool isyeriVar, Action? tohumlandi = null)
+    private static Task<DemoSeedOutcome> Run(
+        DemoSeedOptions options, bool isyeriVar, Action? tohumlandi = null)
         => DemoDataSeeder.SeedAsync(
-            ayarlar,
+            options,
             _ => Task.FromResult(isyeriVar),
-            _ => { tohumlandi?.Invoke(); return Task.CompletedTask; },
+            _ => { onSeed?.Invoke(); return Task.CompletedTask; },
             NullLogger.Instance);
 
     [Fact]
     public async Task Bayrak_kapaliyken_hic_dokunmamali()
     {
-        var dokunuldu = false;
-        var sonuc = await Kos(Gecerli() with { Enabled = false }, isyeriVar: false,
-            tohumlandi: () => dokunuldu = true);
+        var touched = false;
+        var result = await Run(Valid() with { Enabled = false }, isyeriVar: false,
+            onSeed: () => touched = true);
 
-        sonuc.ShouldBe(DemoSeedOutcome.Kapali);
-        dokunuldu.ShouldBeFalse();
+        result.ShouldBe(DemoSeedOutcome.Disabled);
+        touched.ShouldBeFalse();
     }
 
     [Theory]
@@ -106,47 +117,47 @@ public sealed class DemoDataSeederTests
     [InlineData("demo@poyra.test", null)]
     [InlineData("", "parola")]
     [InlineData("demo@poyra.test", "  ")]
-    public async Task Eksik_giris_bilgisi_varsa_atlamali(string? eposta, string? parola)
+    public async Task Eksik_giris_bilgisi_varsa_atlamali(string? email, string? password)
     {
-        var dokunuldu = false;
-        var sonuc = await Kos(
-            Gecerli() with { Email = eposta, Password = parola }, isyeriVar: false,
-            tohumlandi: () => dokunuldu = true);
+        var touched = false;
+        var result = await Run(
+            Valid() with { Email = email, Password = password }, isyeriVar: false,
+            onSeed: () => touched = true);
 
-        sonuc.ShouldBe(DemoSeedOutcome.EksikAyar);
-        dokunuldu.ShouldBeFalse();
+        result.ShouldBe(DemoSeedOutcome.MissingSettings);
+        touched.ShouldBeFalse();
     }
 
     [Fact]
     public async Task Tek_bir_isyeri_bile_varsa_hicbir_sey_yazmamali()
     {
-        var dokunuldu = false;
-        var sonuc = await Kos(Gecerli(), isyeriVar: true, tohumlandi: () => dokunuldu = true);
+        var touched = false;
+        var result = await Run(Valid(), isyeriVar: true, onSeed: () => touched = true);
 
-        sonuc.ShouldBe(DemoSeedOutcome.IsyeriVar);
-        dokunuldu.ShouldBeFalse();
+        result.ShouldBe(DemoSeedOutcome.TenantExists);
+        touched.ShouldBeFalse();
     }
 
     [Fact]
     public async Task Bos_veritabaninda_tohumlamali()
     {
-        var dokunuldu = false;
-        var sonuc = await Kos(Gecerli(), isyeriVar: false, tohumlandi: () => dokunuldu = true);
+        var touched = false;
+        var result = await Run(Valid(), isyeriVar: false, onSeed: () => touched = true);
 
-        sonuc.ShouldBe(DemoSeedOutcome.Tohumlandi);
-        dokunuldu.ShouldBeTrue();
+        result.ShouldBe(DemoSeedOutcome.Seeded);
+        touched.ShouldBeTrue();
     }
 
     [Fact]
     public async Task Tohumlama_patlarsa_acilisi_dusurmemeli()
     {
-        var sonuc = await DemoDataSeeder.SeedAsync(
-            Gecerli(),
+        var result = await DemoDataSeeder.SeedAsync(
+            Valid(),
             _ => Task.FromResult(false),
             _ => throw new InvalidOperationException("tohumlama patladı"),
             NullLogger.Instance);
 
-        sonuc.ShouldBe(DemoSeedOutcome.Basarisiz);
+        result.ShouldBe(DemoSeedOutcome.Failed);
     }
 }
 ```
@@ -159,28 +170,28 @@ Beklenen: `error CS0246: 'DemoSeedOptions' türü bulunamadı` (tür henüz yok)
 
 - [ ] **Adım 3: Ayar kaydını yaz**
 
-`src/Poyra.Api/Database/DemoSeedOptions.cs`:
+`src/Poyra.Persistence/DemoSeedOptions.cs`:
 
 ```csharp
-namespace Poyra.Api.Database;
+namespace Poyra.Persistence;
 
 /// <summary>Demo tohumlamasının sonucu — günlüğe ve testlere aynı kelimeyle döner.</summary>
 public enum DemoSeedOutcome
 {
     /// <summary>Bayrak kapalı; hiç bakılmadı.</summary>
-    Kapali,
+    Disabled,
 
     /// <summary>Bayrak açık ama e-posta ya da parola verilmemiş.</summary>
-    EksikAyar,
+    MissingSettings,
 
     /// <summary>Veritabanında en az bir işyeri var; hiçbir şey yazılmadı.</summary>
-    IsyeriVar,
+    TenantExists,
 
     /// <summary>Demo verisi kuruldu.</summary>
-    Tohumlandi,
+    Seeded,
 
     /// <summary>Tohumlama sırasında hata çıktı; açılış sürdürüldü.</summary>
-    Basarisiz,
+    Failed,
 }
 
 /// <summary>
@@ -203,12 +214,12 @@ public sealed record DemoSeedOptions
 
 - [ ] **Adım 4: Karar mantığını yaz**
 
-`src/Poyra.Api/Database/DemoDataSeeder.cs`:
+`src/Poyra.Persistence/DemoDataSeeder.cs`:
 
 ```csharp
 using Microsoft.Extensions.Logging;
 
-namespace Poyra.Api.Database;
+namespace Poyra.Persistence;
 
 /// <summary>
 /// Demo verisinin KURULUP kurulmayacağına karar verir; satırları kendisi yazmaz
@@ -218,41 +229,41 @@ public static class DemoDataSeeder
 {
     public static async Task<DemoSeedOutcome> SeedAsync(
         DemoSeedOptions options,
-        Func<CancellationToken, Task<bool>> isyeriVarMi,
-        Func<CancellationToken, Task> tohumla,
+        Func<CancellationToken, Task<bool>> tenantExists,
+        Func<CancellationToken, Task> seed,
         ILogger logger,
         CancellationToken cancellationToken = default)
     {
         if (!options.Enabled)
-            return DemoSeedOutcome.Kapali;
+            return DemoSeedOutcome.Disabled;
 
         if (string.IsNullOrWhiteSpace(options.Email) || string.IsNullOrWhiteSpace(options.Password))
         {
             logger.LogWarning(
                 "Demo tohumlaması açık ama {Section}:Email / :Password verilmemiş — atlanıyor.",
                 DemoSeedOptions.Section);
-            return DemoSeedOutcome.EksikAyar;
+            return DemoSeedOutcome.MissingSettings;
         }
 
         try
         {
             // Bir tane bile işyeri varsa burası gerçek bir kurulumdur: dokunulmaz.
-            if (await isyeriVarMi(cancellationToken))
+            if (await tenantExists(cancellationToken))
             {
                 logger.LogInformation(
                     "Demo tohumlaması atlandı: veritabanında zaten işyeri var.");
-                return DemoSeedOutcome.IsyeriVar;
+                return DemoSeedOutcome.TenantExists;
             }
 
-            await tohumla(cancellationToken);
+            await seed(cancellationToken);
             logger.LogInformation("Demo verisi kuruldu (giriş: {Email}).", options.Email);
-            return DemoSeedOutcome.Tohumlandi;
+            return DemoSeedOutcome.Seeded;
         }
         catch (Exception exception)
         {
             // Demo verisi açılışı düşürmeye değmez: uygulama demo verisi olmadan da çalışır.
             logger.LogWarning(exception, "Demo tohumlaması başarısız — açılış sürdürülüyor.");
-            return DemoSeedOutcome.Basarisiz;
+            return DemoSeedOutcome.Failed;
         }
     }
 }
@@ -264,7 +275,7 @@ public static class DemoDataSeeder
 
 Beklenen: `Başarılı! - Başarısız: 0, Başarılı: 8`
 
-- [ ] **Adım 6: `.env.example`'a ayarları ekle**
+- [ ] **Adım 6: `.env.example`'a optionsı ekle**
 
 `.env.example` içinde `# --- E-Posta` satırının ÜSTÜNE ekle:
 
@@ -299,8 +310,8 @@ Beklenen: `POYRA_DEMO_PASSWORD=` sonrası ~24 karakterlik alfanümerik dizi.
 - [ ] **Adım 9: Commit**
 
 ```bash
-git add src/Poyra.Api/Database/DemoSeedOptions.cs src/Poyra.Api/Database/DemoDataSeeder.cs tests/Poyra.Tests.Unit/DemoDataSeederTests.cs .env.example scripts/anahtar-uret.sh
-git commit -m "feat(api): demo tohumlama ayarları ve karar mantığı"
+git add src/Poyra.Persistence/DemoSeedOptions.cs src/Poyra.Persistence/DemoDataSeeder.cs tests/Poyra.Tests.Unit/DemoDataSeederTests.cs .env.example scripts/anahtar-uret.sh
+git commit -m "feat(api): demo tohumlama optionsı ve karar mantığı"
 ```
 
 ---
@@ -313,9 +324,9 @@ git commit -m "feat(api): demo tohumlama ayarları ve karar mantığı"
 
 **Arayüzler:**
 - Tüketir: Görev 1'den `DemoSeedOptions`, `DemoSeedOutcome`, `DemoDataSeeder.SeedAsync`.
-- Üretir: `DemoDataWriter.IsyeriVarMiAsync(IServiceProvider, CancellationToken) → Task<bool>`
-  ve `DemoDataWriter.YazAsync(IServiceProvider, DemoSeedOptions, ILogger, CancellationToken) → Task`.
-  Görev 3 (`Program.cs` kancası) bu iki imzayı çağırır; Görev 4 ve 5 `YazAsync` gövdesini büyütür.
+- Üretir: `DemoDataWriter.TenantExistsAsync(IServiceProvider, CancellationToken) → Task<bool>`
+  ve `DemoDataWriter.WriteAsync(IServiceProvider, DemoSeedOptions, ILogger, CancellationToken) → Task`.
+  Görev 3 (`Program.cs` kancası) bu iki imzayı çağırır; Görev 4 ve 5 `WriteAsync` gövdesini büyütür.
 
 Mevcut `CreateTenantCommand` kullanılır — organizasyon, işyeri, varsayılan iş profili,
 API anahtarı ve parolası hash'lenmiş sahip kullanıcıyı birlikte kurar. Elle `User` üretip
@@ -333,6 +344,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Poyra.Api.Database;
 using Poyra.Modules.Tenancy;
 using Poyra.Modules.Tenancy.Domain;
+using Poyra.Persistence;
 using Shouldly;
 using Xunit;
 
@@ -341,7 +353,7 @@ namespace Poyra.Tests.Integration;
 [Collection(nameof(PostgresFixture))]
 public sealed class DemoSeedTests(PostgresFixture fixture)
 {
-    private static DemoSeedOptions Ayarlar() => new()
+    private static DemoSeedOptions Options() => new()
     {
         Enabled = true,
         Email = "demo@poyra.test",
@@ -350,54 +362,54 @@ public sealed class DemoSeedTests(PostgresFixture fixture)
     };
 
     [Fact]
-    public async Task Bos_veritabanina_isyeri_ve_giris_kullanicisi_kurmali()
+    public async Task Bos_veritabanina_isyeri_ve_giris_usersi_kurmali()
     {
-        await using var kapsam = fixture.CreateApiScope();
-        var ayarlar = Ayarlar();
+        await using var scope = fixture.CreateApiScope();
+        var options = Options();
 
-        await DemoDataWriter.YazAsync(
-            kapsam.ServiceProvider, ayarlar, NullLogger.Instance, TestContext.Current.CancellationToken);
+        await DemoDataWriter.WriteAsync(
+            scope.ServiceProvider, options, NullLogger.Instance, TestContext.Current.CancellationToken);
 
-        var db = kapsam.ServiceProvider.GetRequiredService<TenancyDbContext>();
-        var isyeri = await db.Tenants.SingleOrDefaultAsync(
-            t => t.Slug == ayarlar.TenantSlug, TestContext.Current.CancellationToken);
-        isyeri.ShouldNotBeNull();
+        var db = scope.ServiceProvider.GetRequiredService<TenancyDbContext>();
+        var tenant = await db.Tenants.SingleOrDefaultAsync(
+            t => t.Slug == options.TenantSlug, TestContext.Current.CancellationToken);
+        tenant.ShouldNotBeNull();
 
-        var kullanici = await db.Users.SingleOrDefaultAsync(
-            u => u.Email == ayarlar.Email, TestContext.Current.CancellationToken);
-        kullanici.ShouldNotBeNull();
-        kullanici.PasswordHash.ShouldNotBeNullOrWhiteSpace();
-        kullanici.PasswordHash.ShouldNotBe(ayarlar.Password); // düz metin saklanmamalı
+        var user = await db.Users.SingleOrDefaultAsync(
+            u => u.Email == options.Email, TestContext.Current.CancellationToken);
+        user.ShouldNotBeNull();
+        user.PasswordHash.ShouldNotBeNullOrWhiteSpace();
+        user.PasswordHash.ShouldNotBe(options.Password); // düz metin saklanmamalı
 
         // Parola gerçekten ÇALIŞMALI: hash doğrulanabiliyor mu?
-        var hasher = kapsam.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
-        hasher.VerifyHashedPassword(kullanici, kullanici.PasswordHash, ayarlar.Password!)
+        var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
+        hasher.VerifyHashedPassword(user, user.PasswordHash, options.Password!)
             .ShouldNotBe(PasswordVerificationResult.Failed);
     }
 
     [Fact]
     public async Task Isyeri_varken_tohumlayici_hicbir_sey_yazmamali()
     {
-        await using var kapsam = fixture.CreateApiScope();
-        var ayarlar = Ayarlar();
+        await using var scope = fixture.CreateApiScope();
+        var options = Options();
 
-        var oncekiSayi = await kapsam.ServiceProvider
+        var beforeCount = await scope.ServiceProvider
             .GetRequiredService<TenancyDbContext>().Tenants
             .CountAsync(TestContext.Current.CancellationToken);
 
-        var sonuc = await DemoDataSeeder.SeedAsync(
-            ayarlar,
-            ct => DemoDataWriter.IsyeriVarMiAsync(kapsam.ServiceProvider, ct),
-            ct => DemoDataWriter.YazAsync(kapsam.ServiceProvider, ayarlar, NullLogger.Instance, ct),
+        var result = await DemoDataSeeder.SeedAsync(
+            options,
+            ct => DemoDataWriter.TenantExistsAsync(scope.ServiceProvider, ct),
+            ct => DemoDataWriter.WriteAsync(scope.ServiceProvider, options, NullLogger.Instance, ct),
             NullLogger.Instance,
             TestContext.Current.CancellationToken);
 
-        sonuc.ShouldBe(DemoSeedOutcome.IsyeriVar);
+        result.ShouldBe(DemoSeedOutcome.TenantExists);
 
-        var sonrakiSayi = await kapsam.ServiceProvider
+        var afterCount = await scope.ServiceProvider
             .GetRequiredService<TenancyDbContext>().Tenants
             .CountAsync(TestContext.Current.CancellationToken);
-        sonrakiSayi.ShouldBe(oncekiSayi);
+        afterCount.ShouldBe(beforeCount);
     }
 }
 ```
@@ -410,14 +422,14 @@ public sealed class DemoSeedTests(PostgresFixture fixture)
 
 Beklenen: `error CS1061: 'PostgresFixture' 'CreateApiScope' tanımı içermiyor`.
 
-- [ ] **Adım 3: Fikstüre API kapsamı ekle**
+- [ ] **Adım 3: Fikstüre API scopeı ekle**
 
 `tests/Poyra.Tests.Integration/PostgresFixture.cs` içine, sınıfın sonuna ekle:
 
 ```csharp
     /// <summary>
     /// Demo tohumlayıcısı IDispatcher üzerinden CreateTenantCommand gönderir; bu yüzden
-    /// yalnız DbContext değil, CQRS kayıtları da olan bir kapsam gerekir.
+    /// yalnız DbContext değil, CQRS kayıtları da olan bir scope gerekir.
     /// </summary>
     public AsyncServiceScope CreateApiScope()
     {
@@ -464,6 +476,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Poyra.Modules.Tenancy;
 using Poyra.Modules.Tenancy.Features.CreateTenant;
+using Poyra.Persistence;
 using Poyra.SharedKernel.Cqrs;
 
 namespace Poyra.Api.Database;
@@ -474,14 +487,14 @@ namespace Poyra.Api.Database;
 /// </summary>
 public static class DemoDataWriter
 {
-    public static async Task<bool> IsyeriVarMiAsync(
+    public static async Task<bool> TenantExistsAsync(
         IServiceProvider services, CancellationToken cancellationToken)
     {
         var db = services.GetRequiredService<TenancyDbContext>();
         return await db.Tenants.AnyAsync(cancellationToken);
     }
 
-    public static async Task YazAsync(
+    public static async Task WriteAsync(
         IServiceProvider services,
         DemoSeedOptions options,
         ILogger logger,
@@ -491,7 +504,7 @@ public static class DemoDataWriter
 
         // Mevcut ve doğrulanmış yol: organizasyon + işyeri + varsayılan profil +
         // API anahtarı + parolası hash'lenmiş sahip kullanıcı birlikte kurulur.
-        var isyeri = await dispatcher.Send(
+        var tenant = await dispatcher.Send(
             new CreateTenantCommand(
                 options.TenantName,
                 options.TenantSlug,
@@ -501,7 +514,7 @@ public static class DemoDataWriter
             cancellationToken);
 
         logger.LogInformation(
-            "Demo işyeri kuruldu: {Slug} ({TenantId}).", isyeri.Slug, isyeri.TenantId);
+            "Demo işyeri kuruldu: {Slug} ({TenantId}).", tenant.Slug, tenant.TenantId);
     }
 }
 ```
@@ -533,7 +546,7 @@ girilir. Görev 4 ve 5 yalnız veri zenginleştirir.
 
 **Arayüzler:**
 - Tüketir: Görev 1'den `DemoSeedOptions`/`DemoDataSeeder`, Görev 2'den `DemoDataWriter`.
-- Üretir: `DemoDataWriter.KilitliKosAsync(string connectionString, Func<Task> is, CancellationToken) → Task`.
+- Üretir: `DemoDataWriter.RunLockedAsync(string connectionString, Func<Task> is, CancellationToken) → Task`.
 
 - [ ] **Adım 1: Kilit yardımcısını yaz**
 
@@ -544,29 +557,29 @@ girilir. Görev 4 ve 5 yalnız veri zenginleştirir.
     /// Verilen işi oturum düzeyi advisory lock altında koşturur.
     ///
     /// Her modülün kendi DbContext'i (dolayısıyla kendi bağlantısı) var; tek transaction
-    /// hepsini kapsayamaz. Bu yüzden kilit, tohumlama boyunca AÇIK TUTULAN ayrı bir
+    /// allni kapsayamaz. Bu yüzden kilit, tohumlama boyunca AÇIK TUTULAN ayrı bir
     /// bağlantıda alınır. Böylece iki API kopyası aynı anda kalksa bile "işyeri var mı?"
     /// kontrolü ile yazma arasına başka kimse giremez.
     /// </summary>
-    public static async Task KilitliKosAsync(
-        string connectionString, Func<Task> islem, CancellationToken cancellationToken)
+    public static async Task RunLockedAsync(
+        string connectionString, Func<Task> work, CancellationToken cancellationToken)
     {
-        await using var kilitBaglantisi = new NpgsqlConnection(connectionString);
-        await kilitBaglantisi.OpenAsync(cancellationToken);
+        await using var lockConnection = new NpgsqlConnection(connectionString);
+        await lockConnection.OpenAsync(cancellationToken);
 
-        await using (var kilitle = new NpgsqlCommand("SELECT pg_advisory_lock(20260826)", kilitBaglantisi))
-            await kilitle.ExecuteNonQueryAsync(cancellationToken);
+        await using (var acquire = new NpgsqlCommand("SELECT pg_advisory_lock(20260826)", lockConnection))
+            await acquire.ExecuteNonQueryAsync(cancellationToken);
 
         try
         {
-            await islem();
+            await work();
         }
         finally
         {
             // Bağlantı kapanınca oturum kilitleri zaten düşer; bu açık bırakma
             // yalnız niyeti okunur kılıyor.
-            await using var coz = new NpgsqlCommand("SELECT pg_advisory_unlock(20260826)", kilitBaglantisi);
-            await coz.ExecuteNonQueryAsync(CancellationToken.None);
+            await using var release = new NpgsqlCommand("SELECT pg_advisory_unlock(20260826)", lockConnection);
+            await release.ExecuteNonQueryAsync(CancellationToken.None);
         }
     }
 ```
@@ -586,17 +599,17 @@ ALTINA ekle:
 ```csharp
 // Demo verisi: yalnız bayrak açıkken ve veritabanı BOŞKEN. Kilit, birden çok kopya
 // aynı anda kalkarsa yalnız birinin tohumlamasını sağlar. Hata çıkarsa açılış sürer.
-var demoAyarlari = app.Configuration.GetSection(DemoSeedOptions.Section).Get<DemoSeedOptions>()
+var demoOptions = app.Configuration.GetSection(DemoSeedOptions.Section).Get<DemoSeedOptions>()
                    ?? new DemoSeedOptions();
 
-if (demoAyarlari.Enabled)
+if (demoOptions.Enabled)
 {
-    await using var demoKapsami = app.Services.CreateAsyncScope();
-    await DemoDataWriter.KilitliKosAsync(connectionString, async () =>
+    await using var demoScope = app.Services.CreateAsyncScope();
+    await DemoDataWriter.RunLockedAsync(connectionString, async () =>
         await DemoDataSeeder.SeedAsync(
-            demoAyarlari,
-            ct => DemoDataWriter.IsyeriVarMiAsync(demoKapsami.ServiceProvider, ct),
-            ct => DemoDataWriter.YazAsync(demoKapsami.ServiceProvider, demoAyarlari, app.Logger, ct),
+            demoOptions,
+            ct => DemoDataWriter.TenantExistsAsync(demoScope.ServiceProvider, ct),
+            ct => DemoDataWriter.WriteAsync(demoScope.ServiceProvider, demoOptions, app.Logger, ct),
             app.Logger),
         CancellationToken.None);
 }
@@ -648,8 +661,8 @@ git commit -m "feat(api): demo tohumlamasını açılışa bağla"
 - Değiştir: `tests/Poyra.Tests.Integration/DemoSeedTests.cs`
 
 **Arayüzler:**
-- Tüketir: Görev 2'den `DemoDataWriter.YazAsync`.
-- Üretir: `YazAsync` artık müşteri ve ödeme de yazar. Görev 5 aynı metodu genişletir.
+- Tüketir: Görev 2'den `DemoDataWriter.WriteAsync`.
+- Üretir: `WriteAsync` artık müşteri ve ödeme de yazar. Görev 5 aynı metodu genişletir.
 
 Pano grafikleri düz çizgi olmasın diye ödemeler son 30 güne yayılır ve durumları karışıktır.
 
@@ -661,32 +674,32 @@ Pano grafikleri düz çizgi olmasın diye ödemeler son 30 güne yayılır ve du
     [Fact]
     public async Task Musteri_ve_farkli_durumlarda_odeme_yazmali()
     {
-        await using var kapsam = fixture.CreateApiScope();
-        var ayarlar = Ayarlar();
+        await using var scope = fixture.CreateApiScope();
+        var options = Options();
 
-        await DemoDataWriter.YazAsync(
-            kapsam.ServiceProvider, ayarlar, NullLogger.Instance, TestContext.Current.CancellationToken);
+        await DemoDataWriter.WriteAsync(
+            scope.ServiceProvider, options, NullLogger.Instance, TestContext.Current.CancellationToken);
 
-        var tenancy = kapsam.ServiceProvider.GetRequiredService<TenancyDbContext>();
-        var isyeriId = await tenancy.Tenants
-            .Where(t => t.Slug == ayarlar.TenantSlug)
+        var tenancy = scope.ServiceProvider.GetRequiredService<TenancyDbContext>();
+        var tenantId = await tenancy.Tenants
+            .Where(t => t.Slug == options.TenantSlug)
             .Select(t => t.Id)
             .SingleAsync(TestContext.Current.CancellationToken);
 
-        var musteriler = fixture.CreateCustomers(PostgresFixture.TenantCtx(isyeriId));
-        (await musteriler.Customers.CountAsync(TestContext.Current.CancellationToken))
+        var customers = fixture.CreateCustomers(PostgresFixture.TenantCtx(tenantId));
+        (await customers.Customers.CountAsync(TestContext.Current.CancellationToken))
             .ShouldBeGreaterThanOrEqualTo(4);
 
-        var odemeler = fixture.CreatePayments(PostgresFixture.TenantCtx(isyeriId));
-        var hepsi = await odemeler.PaymentIntents.ToListAsync(TestContext.Current.CancellationToken);
+        var payments = fixture.CreatePayments(PostgresFixture.TenantCtx(tenantId));
+        var all = await payments.PaymentIntents.ToListAsync(TestContext.Current.CancellationToken);
 
-        hepsi.Count.ShouldBeGreaterThanOrEqualTo(20);
-        hepsi.Select(x => x.Status).Distinct().Count().ShouldBeGreaterThanOrEqualTo(2);
-        hepsi.ShouldContain(x => x.Status == PaymentStatus.Succeeded);
-        hepsi.ShouldContain(x => x.Status == PaymentStatus.Failed);
+        all.Count.ShouldBeGreaterThanOrEqualTo(20);
+        all.Select(x => x.Status).Distinct().Count().ShouldBeGreaterThanOrEqualTo(2);
+        all.ShouldContain(x => x.Status == PaymentStatus.Succeeded);
+        all.ShouldContain(x => x.Status == PaymentStatus.Failed);
 
         // Son 30 güne yayılmış olmalı: pano grafiği tek güne yığılmasın.
-        hepsi.Select(x => x.CreatedAt.Date).Distinct().Count().ShouldBeGreaterThanOrEqualTo(5);
+        all.Select(x => x.CreatedAt.Date).Distinct().Count().ShouldBeGreaterThanOrEqualTo(5);
     }
 ```
 
@@ -700,14 +713,14 @@ Beklenen: `Shouldly.ShouldAssertException` — müşteri sayısı 0, beklenen �
 
 - [ ] **Adım 3: Müşteri ve ödeme yazımını ekle**
 
-`src/Poyra.Api/Database/DemoDataWriter.cs` içinde `YazAsync`'in sonuna, günlük satırından
+`src/Poyra.Api/Database/DemoDataWriter.cs` içinde `WriteAsync`'in sonuna, günlük satırından
 ÖNCE ekle:
 
 ```csharp
         var tenantContext = services.GetRequiredService<TenantContext>();
-        tenantContext.Set(isyeri.TenantId);
+        tenantContext.Set(tenant.TenantId);
 
-        await MusteriVeOdemeYazAsync(services, isyeri.TenantId, isyeri.ProfileId, cancellationToken);
+        await WriteCustomersAndPaymentsAsync(services, tenant.TenantId, tenant.ProfileId, cancellationToken);
 ```
 
 Ve sınıfa şu metodu ekle:
@@ -717,15 +730,15 @@ Ve sınıfa şu metodu ekle:
     /// Demo müşterileri ve son 30 güne yayılmış ödemeler. Tutarlar ve tarihler
     /// SABİTTİR (Random yok): demo ekran görüntüleri dağıtımlar arasında değişmesin.
     /// </summary>
-    private static async Task MusteriVeOdemeYazAsync(
+    private static async Task WriteCustomersAndPaymentsAsync(
         IServiceProvider services, Guid tenantId, Guid profileId, CancellationToken cancellationToken)
     {
-        var musteriDb = services.GetRequiredService<CustomersDbContext>();
-        var odemeDb = services.GetRequiredService<PaymentsDbContext>();
+        var customersDb = services.GetRequiredService<CustomersDbContext>();
+        var paymentsDb = services.GetRequiredService<PaymentsDbContext>();
         var clock = services.GetRequiredService<IClock>();
-        var bugun = clock.UtcNow;
+        var today = clock.UtcNow;
 
-        string[,] kisiler =
+        string[,] people =
         {
             { "mus-001", "Ayşe Yılmaz",    "ayse@ornek.test",   "+905321112233" },
             { "mus-002", "Mehmet Demir",   "mehmet@ornek.test", "+905332223344" },
@@ -734,57 +747,57 @@ Ve sınıfa şu metodu ekle:
             { "mus-005", "Elif Çelik",     "elif@ornek.test",   "+905365556677" },
         };
 
-        for (var i = 0; i < kisiler.GetLength(0); i++)
+        for (var i = 0; i < people.GetLength(0); i++)
         {
-            musteriDb.Customers.Add(new Customer
+            customersDb.Customers.Add(new Customer
             {
                 TenantId = tenantId,
-                Ref = kisiler[i, 0],
-                Name = kisiler[i, 1],
-                Email = kisiler[i, 2],
-                Phone = kisiler[i, 3],
+                Ref = people[i, 0],
+                Name = people[i, 1],
+                Email = people[i, 2],
+                Phone = people[i, 3],
             });
         }
 
-        await musteriDb.SaveChangesAsync(cancellationToken);
+        await customersDb.SaveChangesAsync(cancellationToken);
 
         // 24 ödeme: 6'sı başarısız, kalanı başarılı. Tutarlar 149,90 TL'den başlayıp artar.
         for (var i = 0; i < 24; i++)
         {
-            var tutar = 14990 + (i * 3175);
-            var odeme = PaymentIntent.Create(
+            var amountMinor = 14990 + (i * 3175);
+            var payment = PaymentIntent.Create(
                 tenantId,
                 profileId,
-                Money.Of(tutar, "TRY"),
+                Money.Of(amountMinor, "TRY"),
                 $"Demo sipariş #{1000 + i}",
                 installments: i % 4 == 0 ? 3 : 1,
-                customerRef: kisiler[i % kisiler.GetLength(0), 0],
+                customerRef: people[i % people.GetLength(0), 0],
                 channel: "api");
 
             if (i % 4 == 1)
-                odeme.MarkFailed();
+                payment.MarkFailed();
             else
-                odeme.MarkSucceededDirect();
+                payment.MarkSucceededDirect();
 
-            odemeDb.PaymentIntents.Add(odeme);
+            paymentsDb.PaymentIntents.Add(payment);
         }
 
-        await odemeDb.SaveChangesAsync(cancellationToken);
+        await paymentsDb.SaveChangesAsync(cancellationToken);
 
         // Tarihleri geriye yay: CreatedAt denetim yorumlayıcısı tarafından yazıldığı için
         // kayıt SONRASI güncellenir. 24 ödeme 30 güne dağılır.
-        var yazilanlar = await odemeDb.PaymentIntents
+        var written = await paymentsDb.PaymentIntents
             .OrderBy(x => x.Id)
             .ToListAsync(cancellationToken);
 
-        for (var i = 0; i < yazilanlar.Count; i++)
+        for (var i = 0; i < written.Count; i++)
         {
-            var gunOnce = 29 - (i * 29 / Math.Max(1, yazilanlar.Count - 1));
-            yazilanlar[i].CreatedAt = bugun.AddDays(-gunOnce);
-            yazilanlar[i].UpdatedAt = yazilanlar[i].CreatedAt;
+            var daysAgo = 29 - (i * 29 / Math.Max(1, written.Count - 1));
+            written[i].CreatedAt = today.AddDays(-daysAgo);
+            written[i].UpdatedAt = written[i].CreatedAt;
         }
 
-        await odemeDb.SaveChangesAsync(cancellationToken);
+        await paymentsDb.SaveChangesAsync(cancellationToken);
     }
 ```
 
@@ -831,7 +844,7 @@ git commit -m "feat(api): demo müşteri ve ödeme verisi"
 - Değiştir: `tests/Poyra.Tests.Integration/DemoSeedTests.cs`
 
 **Arayüzler:**
-- Tüketir: Görev 4'ten `YazAsync`.
+- Tüketir: Görev 4'ten `WriteAsync`.
 - Üretir: Yeni tür yok; yalnız satır ekler.
 
 `ConnectorAccount.CredentialsEncrypted` boş bırakılır ve `TestMode = true` olur — demo
@@ -845,33 +858,33 @@ kurulumunda gerçek banka kimliği yoktur, bağlantı yalnız panelde görünsü
     [Fact]
     public async Task Pos_baglantisi_rota_kurali_odeme_linki_ve_webhook_yazmali()
     {
-        await using var kapsam = fixture.CreateApiScope();
-        var ayarlar = Ayarlar();
+        await using var scope = fixture.CreateApiScope();
+        var options = Options();
 
-        await DemoDataWriter.YazAsync(
-            kapsam.ServiceProvider, ayarlar, NullLogger.Instance, TestContext.Current.CancellationToken);
+        await DemoDataWriter.WriteAsync(
+            scope.ServiceProvider, options, NullLogger.Instance, TestContext.Current.CancellationToken);
 
-        var isyeriId = await kapsam.ServiceProvider.GetRequiredService<TenancyDbContext>()
-            .Tenants.Where(t => t.Slug == ayarlar.TenantSlug).Select(t => t.Id)
+        var tenantId = await scope.ServiceProvider.GetRequiredService<TenancyDbContext>()
+            .Tenants.Where(t => t.Slug == options.TenantSlug).Select(t => t.Id)
             .SingleAsync(TestContext.Current.CancellationToken);
 
-        var ctx = PostgresFixture.TenantCtx(isyeriId);
+        var ctx = PostgresFixture.TenantCtx(tenantId);
 
         (await fixture.CreateConnectors(ctx).ConnectorAccounts
             .CountAsync(TestContext.Current.CancellationToken)).ShouldBe(1);
 
-        var kural = await fixture.CreateRouting(ctx).RoutingRules
+        var rule = await fixture.CreateRouting(ctx).RoutingRules
             .SingleAsync(TestContext.Current.CancellationToken);
-        kural.IsActive.ShouldBeTrue();
-        kural.Document.ShouldNotBeNullOrWhiteSpace();
+        rule.IsActive.ShouldBeTrue();
+        rule.Document.ShouldNotBeNullOrWhiteSpace();
 
         (await fixture.CreatePaymentLinks(ctx).PaymentLinks
             .CountAsync(TestContext.Current.CancellationToken)).ShouldBe(1);
 
-        var uc = await fixture.CreateWebhooks(ctx).WebhookEndpoints
+        var endpoint = await fixture.CreateWebhooks(ctx).WebhookEndpoints
             .SingleAsync(TestContext.Current.CancellationToken);
-        uc.Active.ShouldBeTrue();
-        uc.EventTypes.ShouldNotBeEmpty();
+        endpoint.Active.ShouldBeTrue();
+        endpoint.EventTypes.ShouldNotBeEmpty();
     }
 ```
 
@@ -900,11 +913,11 @@ Bu, dosyadaki mevcut `CreateTenancy` / `CreatePayments` deseniyle birebir aynıd
 
 - [ ] **Adım 4: Kalan satırları yaz**
 
-`src/Poyra.Api/Database/DemoDataWriter.cs` içinde `MusteriVeOdemeYazAsync` çağrısının
+`src/Poyra.Api/Database/DemoDataWriter.cs` içinde `WriteCustomersAndPaymentsAsync` çağrısının
 ALTINA ekle:
 
 ```csharp
-        await BaglantiVeKurallariYazAsync(services, isyeri.TenantId, cancellationToken);
+        await WriteConnectorAndRulesAsync(services, tenant.TenantId, cancellationToken);
 ```
 
 Ve sınıfa ekle:
@@ -914,11 +927,11 @@ Ve sınıfa ekle:
     /// POS bağlantısı, rota kuralı, ödeme linki ve webhook ucu — panelin ilgili
     /// ekranları boş açılmasın diye. Bağlantıda gerçek banka kimliği YOKTUR.
     /// </summary>
-    private static async Task BaglantiVeKurallariYazAsync(
+    private static async Task WriteConnectorAndRulesAsync(
         IServiceProvider services, Guid tenantId, CancellationToken cancellationToken)
     {
-        var baglantiDb = services.GetRequiredService<ConnectorsDbContext>();
-        baglantiDb.ConnectorAccounts.Add(new ConnectorAccount
+        var connectorsDb = services.GetRequiredService<ConnectorsDbContext>();
+        connectorsDb.ConnectorAccounts.Add(new ConnectorAccount
         {
             TenantId = tenantId,
             ConnectorKey = NestPayConnector.ConnectorKey,
@@ -927,10 +940,10 @@ Ve sınıfa ekle:
             TestMode = true,
             Priority = 100,
         });
-        await baglantiDb.SaveChangesAsync(cancellationToken);
+        await connectorsDb.SaveChangesAsync(cancellationToken);
 
-        var rotaDb = services.GetRequiredService<RoutingDbContext>();
-        rotaDb.RoutingRules.Add(new RoutingRule
+        var routingDb = services.GetRequiredService<RoutingDbContext>();
+        routingDb.RoutingRules.Add(new RoutingRule
         {
             TenantId = tenantId,
             Name = "Demo rota",
@@ -939,10 +952,10 @@ Ve sınıfa ekle:
                 {"version":2,"rules":[{"name":"Varsayılan","when":{},"then":{"strategy":"priority"}}]}
                 """,
         });
-        await rotaDb.SaveChangesAsync(cancellationToken);
+        await routingDb.SaveChangesAsync(cancellationToken);
 
-        var linkDb = services.GetRequiredService<PaymentLinksDbContext>();
-        linkDb.PaymentLinks.Add(new PaymentLink
+        var linksDb = services.GetRequiredService<PaymentLinksDbContext>();
+        linksDb.PaymentLinks.Add(new PaymentLink
         {
             TenantId = tenantId,
             Slug = "demo-urun",
@@ -951,10 +964,10 @@ Ve sınıfa ekle:
             MaxInstallments = 3,
             MaxUsage = 0,
         });
-        await linkDb.SaveChangesAsync(cancellationToken);
+        await linksDb.SaveChangesAsync(cancellationToken);
 
-        var webhookDb = services.GetRequiredService<WebhooksDbContext>();
-        webhookDb.WebhookEndpoints.Add(new WebhookEndpoint
+        var webhooksDb = services.GetRequiredService<WebhooksDbContext>();
+        webhooksDb.WebhookEndpoints.Add(new WebhookEndpoint
         {
             TenantId = tenantId,
             Url = "https://ornek.test/poyra/webhook",
@@ -962,7 +975,7 @@ Ve sınıfa ekle:
             SecretEncrypted = [],
             Active = true,
         });
-        await webhookDb.SaveChangesAsync(cancellationToken);
+        await webhooksDb.SaveChangesAsync(cancellationToken);
     }
 ```
 
@@ -999,7 +1012,7 @@ Beklenen: `Başarılı! - Başarısız: 0, Başarılı: 4`
 
 Çalıştır: `./scripts/test-hizli.sh && dotnet test tests/Poyra.Tests.Integration`
 
-Beklenen: hepsinde `Başarısız: 0`.
+Beklenen: allnde `Başarısız: 0`.
 
 - [ ] **Adım 7: README'ye demo bölümünü ekle**
 

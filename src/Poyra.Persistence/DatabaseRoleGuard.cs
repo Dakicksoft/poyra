@@ -2,7 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
-namespace Poyra.Api.Database;
+namespace Poyra.Persistence;
 
 /// <summary>Guard'ın veritabanından okuduğu rol bilgisi.</summary>
 public sealed record DatabaseRoleFacts(string User, bool SuperUser, bool BypassRls);
@@ -14,7 +14,7 @@ public static class DatabaseRoleGuard
     /// olmayan veritabanı. Geçici kopukluklardan (ağ, henüz açılmamış sunucu) ayrılırlar
     /// çünkü beklemek bunları düzeltmez — yalnız açılışı geciktirir.
     /// </summary>
-    private static readonly string[] KaliciHatalar =
+    private static readonly string[] PermanentSqlStates =
     [
         "28P01",   // invalid_password
         "28000",   // invalid_authorization_specification (rol yok)
@@ -35,24 +35,24 @@ public static class DatabaseRoleGuard
         Func<CancellationToken, Task<DatabaseRoleFacts?>> probe,
         IHostEnvironment environment,
         ILogger logger,
-        int denemeSayisi = 3,
-        TimeSpan? denemeAraligi = null,
+        int attempts = 3,
+        TimeSpan? retryDelay = null,
         CancellationToken cancellationToken = default)
     {
-        var aralik = denemeAraligi ?? TimeSpan.FromSeconds(2);
+        var delay = retryDelay ?? TimeSpan.FromSeconds(2);
 
         DatabaseRoleFacts? facts = null;
-        NpgsqlException? gecici = null;
+        NpgsqlException? transientFailure = null;
 
-        for (var deneme = 1; deneme <= denemeSayisi; deneme++)
+        for (var attempt = 1; attempt <= attempts; attempt++)
         {
             try
             {
                 facts = await probe(cancellationToken);
-                gecici = null;
+                transientFailure = null;
                 break;
             }
-            catch (PostgresException exception) when (KaliciHatalar.Contains(exception.SqlState))
+            catch (PostgresException exception) when (PermanentSqlStates.Contains(exception.SqlState))
             {
                 // Bu hata beklemekle geçmez, o yüzden yeniden denenmez. Uygulama bu haldeyken
                 // hiçbir iş yapamaz — yalnız 503 servis eder — ve rol yetkisi doğrulaması hiç
@@ -72,16 +72,16 @@ public static class DatabaseRoleGuard
             catch (NpgsqlException exception)
             {
                 // Geçici olabilir: postgres henüz açılmamış, ağ takılmış. Kısa bir hak tanınır.
-                gecici = exception;
-                if (deneme < denemeSayisi)
-                    await Task.Delay(aralik, cancellationToken);
+                transientFailure = exception;
+                if (attempt < attempts)
+                    await Task.Delay(delay, cancellationToken);
             }
         }
 
-        if (gecici is not null)
+        if (transientFailure is not null)
         {
-            logger.LogWarning(gecici,
-                "Rol yetkisi doğrulanamadı — veritabanına {Deneme} denemede ulaşılamadı.", denemeSayisi);
+            logger.LogWarning(transientFailure,
+                "Rol yetkisi doğrulanamadı — veritabanına {Attempts} denemede ulaşılamadı.", attempts);
             return;
         }
 

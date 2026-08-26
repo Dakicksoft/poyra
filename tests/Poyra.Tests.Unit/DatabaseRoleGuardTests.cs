@@ -2,7 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
-using Poyra.Api.Database;
+using Poyra.Persistence;
 using Shouldly;
 using Xunit;
 
@@ -16,8 +16,8 @@ namespace Poyra.Tests.Unit;
 /// </summary>
 public sealed class DatabaseRoleGuardTests
 {
-    private static PostgresException PgHatasi(string sqlState, string mesaj = "hata")
-        => new(mesaj, "FATAL", "FATAL", sqlState);
+    private static PostgresException PostgresError(string sqlState, string message = "hata")
+        => new(message, "FATAL", "FATAL", sqlState);
 
     // 28P01 yanlış parola · 28000 rol yok · 3D000 veritabanı yok — üçü de beklemekle geçmez.
     [Theory]
@@ -26,29 +26,29 @@ public sealed class DatabaseRoleGuardTests
     [InlineData("3D000")]
     public async Task Kalici_kimlik_hatasi_uretimde_acilisi_durdurmali(string sqlState)
     {
-        var hata = PgHatasi(sqlState, "password authentication failed for user \"poyra_app\"");
+        var error = PostgresError(sqlState, "password authentication failed for user \"poyra_app\"");
 
-        var atilan = await Should.ThrowAsync<InvalidOperationException>(() =>
+        var thrown = await Should.ThrowAsync<InvalidOperationException>(() =>
             DatabaseRoleGuard.EnsureNotPrivilegedAsync(
-                _ => Task.FromException<DatabaseRoleFacts?>(hata),
-                Ortam("Production"), NullLogger.Instance));
+                _ => Task.FromException<DatabaseRoleFacts?>(error),
+                HostEnv("Production"), NullLogger.Instance));
 
-        atilan.Message.ShouldContain(sqlState);
+        thrown.Message.ShouldContain(sqlState);
     }
 
     [Fact]
     public async Task Kalici_kimlik_hatasi_gelistirmede_yalnizca_uyarmali()
     {
-        var gunluk = new YakalayanGunluk();
+        var logger = new CapturingLogger();
 
         await Should.NotThrowAsync(() =>
             DatabaseRoleGuard.EnsureNotPrivilegedAsync(
-                _ => Task.FromException<DatabaseRoleFacts?>(PgHatasi("28P01")),
-                Ortam("Development"), gunluk));
+                _ => Task.FromException<DatabaseRoleFacts?>(PostgresError("28P01")),
+                HostEnv("Development"), logger));
 
         // Geçici bir kopukluktan ayırt edilebilmeli: uyarı, bunun üretimde açılışı
         // engelleyecek KALICI bir hata olduğunu söylemeli.
-        gunluk.Uyarilar.ShouldContain(m => m.Contains("28P01") && m.Contains("engellerdi"));
+        logger.Warnings.ShouldContain(m => m.Contains("28P01") && m.Contains("engellerdi"));
     }
 
     // --- Geçici hatalar: beklemekle geçebilir, kısa bir yeniden deneme hakkı olmalı ---
@@ -56,64 +56,64 @@ public sealed class DatabaseRoleGuardTests
     [Fact]
     public async Task Gecici_hata_yeniden_denenmeli_ve_basarili_olunca_gecmeli()
     {
-        var deneme = 0;
+        var attempts = 0;
 
         await DatabaseRoleGuard.EnsureNotPrivilegedAsync(
             _ =>
             {
-                deneme++;
-                return deneme < 3
+                attempts++;
+                return attempts < 3
                     ? Task.FromException<DatabaseRoleFacts?>(new NpgsqlException("bağlanılamadı"))
                     : Task.FromResult<DatabaseRoleFacts?>(new DatabaseRoleFacts("poyra_app", false, false));
             },
-            Ortam("Production"), NullLogger.Instance,
-            denemeSayisi: 3, denemeAraligi: TimeSpan.Zero);
+            HostEnv("Production"), NullLogger.Instance,
+            attempts: 3, retryDelay: TimeSpan.Zero);
 
-        deneme.ShouldBe(3);
+        attempts.ShouldBe(3);
     }
 
     [Fact]
     public async Task Gecici_hata_surerse_uretimde_bile_acilisi_durdurmamali()
     {
-        var deneme = 0;
-        var gunluk = new YakalayanGunluk();
+        var attempts = 0;
+        var logger = new CapturingLogger();
 
         await Should.NotThrowAsync(() =>
             DatabaseRoleGuard.EnsureNotPrivilegedAsync(
                 _ =>
                 {
-                    deneme++;
+                    attempts++;
                     return Task.FromException<DatabaseRoleFacts?>(new NpgsqlException("bağlanılamadı"));
                 },
-                Ortam("Production"), gunluk,
-                denemeSayisi: 3, denemeAraligi: TimeSpan.Zero));
+                HostEnv("Production"), logger,
+                attempts: 3, retryDelay: TimeSpan.Zero));
 
-        deneme.ShouldBe(3);
-        gunluk.Uyarilar.ShouldNotBeEmpty();
+        attempts.ShouldBe(3);
+        logger.Warnings.ShouldNotBeEmpty();
     }
 
     [Fact]
     public async Task Kalici_hata_yeniden_DENENMEMELI()
     {
-        var deneme = 0;
+        var attempts = 0;
 
         await Should.ThrowAsync<InvalidOperationException>(() =>
             DatabaseRoleGuard.EnsureNotPrivilegedAsync(
                 _ =>
                 {
-                    deneme++;
-                    return Task.FromException<DatabaseRoleFacts?>(PgHatasi("28P01"));
+                    attempts++;
+                    return Task.FromException<DatabaseRoleFacts?>(PostgresError("28P01"));
                 },
-                Ortam("Production"), NullLogger.Instance,
-                denemeSayisi: 3, denemeAraligi: TimeSpan.Zero));
+                HostEnv("Production"), NullLogger.Instance,
+                attempts: 3, retryDelay: TimeSpan.Zero));
 
         // Yanlış parola beklemekle düzelmez; açılışı boş yere geciktirmemeli.
-        deneme.ShouldBe(1);
+        attempts.ShouldBe(1);
     }
 
-    private static IHostEnvironment Ortam(string ad) => new SahteOrtam { EnvironmentName = ad };
+    private static IHostEnvironment HostEnv(string name) => new FakeHostEnvironment { EnvironmentName = name };
 
-    private sealed class SahteOrtam : IHostEnvironment
+    private sealed class FakeHostEnvironment : IHostEnvironment
     {
         public string EnvironmentName { get; set; } = "Production";
         public string ApplicationName { get; set; } = "Poyra.Api";
@@ -121,9 +121,9 @@ public sealed class DatabaseRoleGuardTests
         public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
     }
 
-    private sealed class YakalayanGunluk : ILogger
+    private sealed class CapturingLogger : ILogger
     {
-        public List<string> Uyarilar { get; } = [];
+        public List<string> Warnings { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
@@ -132,7 +132,7 @@ public sealed class DatabaseRoleGuardTests
             Exception? exception, Func<TState, Exception?, string> formatter)
         {
             if (logLevel is LogLevel.Warning or LogLevel.Error)
-                Uyarilar.Add(formatter(state, exception) + " " + exception);
+                Warnings.Add(formatter(state, exception) + " " + exception);
         }
     }
 }
