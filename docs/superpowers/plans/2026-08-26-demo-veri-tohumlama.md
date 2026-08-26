@@ -72,7 +72,7 @@ veritabanı olmadan birim testiyle sınanır; yazma tarafı entegrasyon testine 
   `DemoDataSeeder.SeedAsync(DemoSeedOptions, Func<CancellationToken,Task<bool>>, Func<CancellationToken,Task>, ILogger, CancellationToken) → Task<DemoSeedOutcome>`.
   Görev 2 ve 3 bu imzayı kullanır.
 
-- [ ] **Adım 1: Başarısız testi yaz**
+- [x] **Adım 1: Başarısız testi yaz**
 
 `tests/Poyra.Tests.Unit/DemoDataSeederTests.cs`:
 
@@ -94,10 +94,10 @@ public sealed class DemoDataSeederTests
     };
 
     private static Task<DemoSeedOutcome> Run(
-        DemoSeedOptions options, bool isyeriVar, Action? tohumlandi = null)
+        DemoSeedOptions options, bool tenantExists, Action? onSeed = null)
         => DemoDataSeeder.SeedAsync(
             options,
-            _ => Task.FromResult(isyeriVar),
+            _ => Task.FromResult(tenantExists),
             _ => { onSeed?.Invoke(); return Task.CompletedTask; },
             NullLogger.Instance);
 
@@ -105,7 +105,7 @@ public sealed class DemoDataSeederTests
     public async Task Bayrak_kapaliyken_hic_dokunmamali()
     {
         var touched = false;
-        var result = await Run(Valid() with { Enabled = false }, isyeriVar: false,
+        var result = await Run(Valid() with { Enabled = false }, tenantExists: false,
             onSeed: () => touched = true);
 
         result.ShouldBe(DemoSeedOutcome.Disabled);
@@ -121,7 +121,7 @@ public sealed class DemoDataSeederTests
     {
         var touched = false;
         var result = await Run(
-            Valid() with { Email = email, Password = password }, isyeriVar: false,
+            Valid() with { Email = email, Password = password }, tenantExists: false,
             onSeed: () => touched = true);
 
         result.ShouldBe(DemoSeedOutcome.MissingSettings);
@@ -132,7 +132,7 @@ public sealed class DemoDataSeederTests
     public async Task Tek_bir_isyeri_bile_varsa_hicbir_sey_yazmamali()
     {
         var touched = false;
-        var result = await Run(Valid(), isyeriVar: true, onSeed: () => touched = true);
+        var result = await Run(Valid(), tenantExists: true, onSeed: () => touched = true);
 
         result.ShouldBe(DemoSeedOutcome.TenantExists);
         touched.ShouldBeFalse();
@@ -142,7 +142,7 @@ public sealed class DemoDataSeederTests
     public async Task Bos_veritabaninda_tohumlamali()
     {
         var touched = false;
-        var result = await Run(Valid(), isyeriVar: false, onSeed: () => touched = true);
+        var result = await Run(Valid(), tenantExists: false, onSeed: () => touched = true);
 
         result.ShouldBe(DemoSeedOutcome.Seeded);
         touched.ShouldBeTrue();
@@ -162,13 +162,13 @@ public sealed class DemoDataSeederTests
 }
 ```
 
-- [ ] **Adım 2: Testi koş, başarısız olduğunu doğrula**
+- [x] **Adım 2: Testi koş, başarısız olduğunu doğrula**
 
 Çalıştır: `dotnet test tests/Poyra.Tests.Unit --filter "FullyQualifiedName~DemoDataSeederTests"`
 
 Beklenen: `error CS0246: 'DemoSeedOptions' türü bulunamadı` (tür henüz yok).
 
-- [ ] **Adım 3: Ayar kaydını yaz**
+- [x] **Adım 3: Ayar kaydını yaz**
 
 `src/Poyra.Persistence/DemoSeedOptions.cs`:
 
@@ -212,7 +212,7 @@ public sealed record DemoSeedOptions
 }
 ```
 
-- [ ] **Adım 4: Karar mantığını yaz**
+- [x] **Adım 4: Karar mantığını yaz**
 
 `src/Poyra.Persistence/DemoDataSeeder.cs`:
 
@@ -269,13 +269,13 @@ public static class DemoDataSeeder
 }
 ```
 
-- [ ] **Adım 5: Testleri koş, geçtiğini doğrula**
+- [x] **Adım 5: Testleri koş, geçtiğini doğrula**
 
 Çalıştır: `dotnet test tests/Poyra.Tests.Unit --filter "FullyQualifiedName~DemoDataSeederTests"`
 
 Beklenen: `Başarılı! - Başarısız: 0, Başarılı: 8`
 
-- [ ] **Adım 6: `.env.example`'a optionsı ekle**
+- [x] **Adım 6: `.env.example`'a optionsı ekle**
 
 `.env.example` içinde `# --- E-Posta` satırının ÜSTÜNE ekle:
 
@@ -292,7 +292,7 @@ POYRA_DEMO_PASSWORD=
 
 ```
 
-- [ ] **Adım 7: `scripts/anahtar-uret.sh`'e demo parolasını ekle**
+- [x] **Adım 7: `scripts/anahtar-uret.sh`'e demo parolasını ekle**
 
 Dosyanın SONUNA ekle:
 
@@ -301,13 +301,13 @@ Dosyanın SONUNA ekle:
 echo "POYRA_DEMO_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=')"
 ```
 
-- [ ] **Adım 8: Betiğin çalıştığını doğrula**
+- [x] **Adım 8: Betiğin çalıştığını doğrula**
 
 Çalıştır: `./scripts/anahtar-uret.sh | grep POYRA_DEMO_PASSWORD`
 
 Beklenen: `POYRA_DEMO_PASSWORD=` sonrası ~24 karakterlik alfanümerik dizi.
 
-- [ ] **Adım 9: Commit**
+- [x] **Adım 9: Commit**
 
 ```bash
 git add src/Poyra.Persistence/DemoSeedOptions.cs src/Poyra.Persistence/DemoDataSeeder.cs tests/Poyra.Tests.Unit/DemoDataSeederTests.cs .env.example scripts/anahtar-uret.sh
