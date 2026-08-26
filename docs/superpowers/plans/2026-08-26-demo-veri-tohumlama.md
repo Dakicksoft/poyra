@@ -332,7 +332,7 @@ Mevcut `CreateTenantCommand` kullanılır — organizasyon, işyeri, varsayılan
 API anahtarı ve parolası hash'lenmiş sahip kullanıcıyı birlikte kurar. Elle `User` üretip
 parola hash'lemek bu doğrulanmış yolu atlamak olurdu.
 
-- [ ] **Adım 1: Başarısız entegrasyon testini yaz**
+- [x] **Adım 1: Başarısız entegrasyon testini yaz**
 
 `tests/Poyra.Tests.Integration/DemoSeedTests.cs`:
 
@@ -364,7 +364,7 @@ public sealed class DemoSeedTests(PostgresFixture fixture)
     [Fact]
     public async Task Bos_veritabanina_isyeri_ve_giris_usersi_kurmali()
     {
-        await using var scope = fixture.CreateApiScope();
+        await using var scope = _factory.Services.CreateAsyncScope();
         var options = Options();
 
         await DemoDataWriter.WriteAsync(
@@ -390,7 +390,7 @@ public sealed class DemoSeedTests(PostgresFixture fixture)
     [Fact]
     public async Task Isyeri_varken_tohumlayici_hicbir_sey_yazmamali()
     {
-        await using var scope = fixture.CreateApiScope();
+        await using var scope = _factory.Services.CreateAsyncScope();
         var options = Options();
 
         var beforeCount = await scope.ServiceProvider
@@ -414,59 +414,26 @@ public sealed class DemoSeedTests(PostgresFixture fixture)
 }
 ```
 
-**Not:** `PostgresFixture` şu an bir `CreateApiScope()` üyesi sunmuyor. Adım 3'te eklenecek.
-
-- [ ] **Adım 2: Testi koş, başarısız olduğunu doğrula**
-
-Çalıştır: `dotnet test tests/Poyra.Tests.Integration --filter "FullyQualifiedName~DemoSeedTests"`
-
-Beklenen: `error CS1061: 'PostgresFixture' 'CreateApiScope' tanımı içermiyor`.
-
-- [ ] **Adım 3: Fikstüre API scopeı ekle**
-
-`tests/Poyra.Tests.Integration/PostgresFixture.cs` içine, sınıfın sonuna ekle:
+**UYGULAMADA DEĞİŞTİ.** Fikstüre elle `ServiceCollection` kurmak yerine depoda zaten
+kullanılan `WebApplicationFactory<ApiEntryPoint>` deseni benimsendi (bkz.
+`CustomerFlowTests`): tüm DbContext'ler, `IDispatcher` ve `IPasswordHasher<User>` hazır
+gelir, elle kayıt gerekmez. Kapsam şöyle alınır:
 
 ```csharp
-    /// <summary>
-    /// Demo tohumlayıcısı IDispatcher üzerinden CreateTenantCommand gönderir; bu yüzden
-    /// yalnız DbContext değil, CQRS kayıtları da olan bir scope gerekir.
-    /// </summary>
-    public AsyncServiceScope CreateApiScope()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Poyra:CredentialKey"] = Convert.ToBase64String(new byte[32]),
-                ["Poyra:JwtKey"] = Convert.ToBase64String(new byte[32]),
-                ["Poyra:VaultKey"] = Convert.ToBase64String(new byte[32]),
-            })
-            .Build());
-        services.AddScoped<TenantContext>();
-        services.AddScoped(_ => CreateTenancy(new TenantContext()));
-        services.AddTenancyModule();
-        services.AddPoyraCqrs(TenancyModule.Assembly);
-
-        return new AsyncServiceScope(services.BuildServiceProvider().CreateScope());
-    }
+await using var scope = _factory.Services.CreateAsyncScope();
 ```
 
-Dosyanın başına gereken `using`'leri ekle:
+Fabrika `UseEnvironment("Testing")` ile kurulur; böylece `DatabaseRoleGuard` üretim
+davranışına girmez. Sonraki görevler de bu kapsamı kullanır — `PostgresFixture`'a
+`CreateApiScope()` EKLENMEZ.
 
-```csharp
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Poyra.SharedKernel.Cqrs;
-```
-
-- [ ] **Adım 4: Testi koş — bu sefer yazıcı eksik olmalı**
+- [x] **Adım 4: Testi koş — bu sefer yazıcı eksik olmalı**
 
 Çalıştır: `dotnet test tests/Poyra.Tests.Integration --filter "FullyQualifiedName~DemoSeedTests"`
 
 Beklenen: `error CS0103: 'DemoDataWriter' adı geçerli değil`.
 
-- [ ] **Adım 5: Yazıcıyı yaz**
+- [x] **Adım 5: Yazıcıyı yaz**
 
 `src/Poyra.Api/Database/DemoDataWriter.cs`:
 
@@ -519,13 +486,13 @@ public static class DemoDataWriter
 }
 ```
 
-- [ ] **Adım 6: Testleri koş, geçtiğini doğrula**
+- [x] **Adım 6: Testleri koş, geçtiğini doğrula**
 
 Çalıştır: `dotnet test tests/Poyra.Tests.Integration --filter "FullyQualifiedName~DemoSeedTests"`
 
 Beklenen: `Başarılı! - Başarısız: 0, Başarılı: 2`
 
-- [ ] **Adım 7: Commit**
+- [x] **Adım 7: Commit**
 
 ```bash
 git add src/Poyra.Api/Database/DemoDataWriter.cs tests/Poyra.Tests.Integration/DemoSeedTests.cs tests/Poyra.Tests.Integration/PostgresFixture.cs
@@ -674,7 +641,7 @@ Pano grafikleri düz çizgi olmasın diye ödemeler son 30 güne yayılır ve du
     [Fact]
     public async Task Musteri_ve_farkli_durumlarda_odeme_yazmali()
     {
-        await using var scope = fixture.CreateApiScope();
+        await using var scope = _factory.Services.CreateAsyncScope();
         var options = Options();
 
         await DemoDataWriter.WriteAsync(
@@ -813,14 +780,8 @@ using Poyra.SharedKernel.Tenancy;
 using Poyra.SharedKernel.Time;
 ```
 
-`PostgresFixture.CreateApiScope()` içine, `services.AddScoped(_ => CreateTenancy(...))`
-satırının altına ekle:
-
-```csharp
-        services.AddScoped(sp => CreateCustomers(sp.GetRequiredService<TenantContext>()));
-        services.AddScoped(sp => CreatePayments(sp.GetRequiredService<TenantContext>()));
-        services.AddSingleton<IClock, SystemClock>();
-```
+DbContext kaydı GEREKMEZ: `WebApplicationFactory` kapsamı `CustomersDbContext`,
+`PaymentsDbContext` ve `IClock`'u zaten sağlıyor.
 
 - [ ] **Adım 4: Testi koş, geçtiğini doğrula**
 
@@ -858,7 +819,7 @@ kurulumunda gerçek banka kimliği yoktur, bağlantı yalnız panelde görünsü
     [Fact]
     public async Task Pos_baglantisi_rota_kurali_odeme_linki_ve_webhook_yazmali()
     {
-        await using var scope = fixture.CreateApiScope();
+        await using var scope = _factory.Services.CreateAsyncScope();
         var options = Options();
 
         await DemoDataWriter.WriteAsync(
@@ -993,14 +954,8 @@ using Poyra.Modules.Webhooks;
 using Poyra.Modules.Webhooks.Domain;
 ```
 
-`PostgresFixture.CreateApiScope()` içine dört bağlamı daha kaydet:
-
-```csharp
-        services.AddScoped(sp => CreateConnectors(sp.GetRequiredService<TenantContext>()));
-        services.AddScoped(sp => CreateRouting(sp.GetRequiredService<TenantContext>()));
-        services.AddScoped(sp => CreateWebhooks(sp.GetRequiredService<TenantContext>()));
-        services.AddScoped(sp => CreatePaymentLinks(sp.GetRequiredService<TenantContext>()));
-```
+DbContext kaydı GEREKMEZ: `WebApplicationFactory` kapsamı bu dört bağlamı da sağlıyor.
+Fikstüre eklenen `CreateWebhooks` / `CreatePaymentLinks` yalnız DOĞRULAMA sorguları için.
 
 - [ ] **Adım 5: Testleri koş, geçtiğini doğrula**
 

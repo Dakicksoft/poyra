@@ -10,7 +10,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Poyra.Api;
-using Poyra.Persistence;
+using Poyra.Api.Database;
 using Poyra.Api.Infrastructure;
 using Poyra.Api.Middleware;
 using Poyra.Modules.Compliance;
