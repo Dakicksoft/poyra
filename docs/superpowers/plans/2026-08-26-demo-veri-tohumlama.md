@@ -633,7 +633,7 @@ git commit -m "feat(api): demo tohumlamasını açılışa bağla"
 
 Pano grafikleri düz çizgi olmasın diye ödemeler son 30 güne yayılır ve durumları karışıktır.
 
-- [ ] **Adım 1: Başarısız testi ekle**
+- [x] **Adım 1: Başarısız testi ekle**
 
 `tests/Poyra.Tests.Integration/DemoSeedTests.cs` içine ekle:
 
@@ -672,13 +672,13 @@ Pano grafikleri düz çizgi olmasın diye ödemeler son 30 güne yayılır ve du
 
 Dosyanın başına ekle: `using Poyra.Modules.Payments.Domain;`
 
-- [ ] **Adım 2: Testi koş, başarısız olduğunu doğrula**
+- [x] **Adım 2: Testi koş, başarısız olduğunu doğrula**
 
 Çalıştır: `dotnet test tests/Poyra.Tests.Integration --filter "FullyQualifiedName~Musteri_ve_farkli"`
 
 Beklenen: `Shouldly.ShouldAssertException` — müşteri sayısı 0, beklenen ≥ 4.
 
-- [ ] **Adım 3: Müşteri ve ödeme yazımını ekle**
+- [x] **Adım 3: Müşteri ve ödeme yazımını ekle**
 
 `src/Poyra.Api/Database/DemoDataWriter.cs` içinde `WriteAsync`'in sonuna, günlük satırından
 ÖNCE ekle:
@@ -783,13 +783,13 @@ using Poyra.SharedKernel.Time;
 DbContext kaydı GEREKMEZ: `WebApplicationFactory` kapsamı `CustomersDbContext`,
 `PaymentsDbContext` ve `IClock`'u zaten sağlıyor.
 
-- [ ] **Adım 4: Testi koş, geçtiğini doğrula**
+- [x] **Adım 4: Testi koş, geçtiğini doğrula**
 
 Çalıştır: `dotnet test tests/Poyra.Tests.Integration --filter "FullyQualifiedName~DemoSeedTests"`
 
 Beklenen: `Başarılı! - Başarısız: 0, Başarılı: 3`
 
-- [ ] **Adım 5: Commit**
+- [x] **Adım 5: Commit**
 
 ```bash
 git add src/Poyra.Api/Database/DemoDataWriter.cs tests/Poyra.Tests.Integration/DemoSeedTests.cs tests/Poyra.Tests.Integration/PostgresFixture.cs

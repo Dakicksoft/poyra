@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Poyra.Api;
 using Poyra.Api.Database;
+using Poyra.Modules.Payments.Domain;
 using Poyra.Modules.Tenancy;
 using Poyra.Modules.Tenancy.Domain;
 using Poyra.Persistence;
@@ -79,6 +80,38 @@ public sealed class DemoSeedTests : IDisposable
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
         hasher.VerifyHashedPassword(user, user.PasswordHash, DemoPassword)
             .ShouldNotBe(PasswordVerificationResult.Failed);
+    }
+
+    [Fact]
+    public async Task Musteri_ve_farkli_durumlarda_odeme_yazmali()
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var options = Options();
+
+        await DemoDataWriter.WriteAsync(
+            scope.ServiceProvider, options, NullLogger.Instance, CancellationToken.None);
+
+        var db = scope.ServiceProvider.GetRequiredService<TenancyDbContext>();
+        var tenantId = await db.Tenants
+            .Where(t => t.Slug == options.TenantSlug)
+            .Select(t => t.Id)
+            .SingleAsync();
+
+        var ctx = PostgresFixture.TenantCtx(tenantId);
+
+        await using var customers = _fixture.CreateCustomers(ctx);
+        (await customers.Customers.CountAsync()).ShouldBeGreaterThanOrEqualTo(4);
+
+        await using var payments = _fixture.CreatePayments(ctx);
+        var all = await payments.PaymentIntents.ToListAsync();
+
+        all.Count.ShouldBeGreaterThanOrEqualTo(20);
+        all.ShouldContain(x => x.Status == PaymentStatus.Succeeded);
+        all.ShouldContain(x => x.Status == PaymentStatus.Failed);
+
+        // Son 30 güne yayılmış olmalı: pano grafiği tek güne yığılmasın.
+        all.Select(x => x.CreatedAt.UtcDateTime.Date).Distinct().Count()
+            .ShouldBeGreaterThanOrEqualTo(5);
     }
 
     [Fact]
