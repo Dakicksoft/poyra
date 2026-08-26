@@ -14,3 +14,6 @@ echo "POYRA_CREDENTIAL_KEY=$(key)"
 echo "POYRA_JWT_KEY=$(key)"
 echo "POYRA_VAULT_KEY=$(key)"
 echo "POYRA_PLATFORM_ADMIN_KEY=$(openssl rand -hex 32)"
+echo "PGWEB_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')"
+# Demo giriş parolası — yalnız POYRA_DEMO=true iken kullanılır.
+echo "POYRA_DEMO_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=')"

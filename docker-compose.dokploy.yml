@@ -1,0 +1,189 @@
+# Poyra — Dokploy (ve benzeri Traefik tabanlı PaaS) kompozisyonu.
+#
+# docker-compose.prod.yml kaynaktan DERLER; bu dosya GHCR'da yayımlanmış imajları ÇEKER.
+#
+# Ortam değişkenleri Dokploy'un Environment sekmesinden verilir; Dokploy bunları compose'un
+# yanına .env olarak yazar, aşağıdaki ${...} ifadeleri oradan okunur. Değerler için
+# .env.example'a ve ./scripts/anahtar-uret.sh çıktısına bakın.
+#
+# Alan adları Dokploy'un Domains sekmesinden: api / panel / checkout, hepsi konteyner
+# portu 8080. Host portu YAYINLANMAZ — Traefik konteynere docker ağı üzerinden gider.
+
+x-app-env: &app-env
+  ASPNETCORE_ENVIRONMENT: Production
+  ConnectionStrings__Poyra: "Host=postgres;Database=${POSTGRES_DB:-poyra};Username=poyra_app;Password=${POYRA_APP_PASSWORD:?zorunlu}"
+  ConnectionStrings__PoyraMigrations: "Host=postgres;Database=${POSTGRES_DB:-poyra};Username=poyra;Password=${POSTGRES_PASSWORD:?zorunlu}"
+  Poyra__CredentialKey: ${POYRA_CREDENTIAL_KEY:?zorunlu}
+  Poyra__JwtKey: ${POYRA_JWT_KEY:?zorunlu}
+  Poyra__VaultKey: ${POYRA_VAULT_KEY:?zorunlu}
+  Poyra__PublicBaseUrl: ${POYRA_PUBLIC_BASE_URL:?zorunlu}
+  Poyra__PanelBaseUrl: ${POYRA_PANEL_BASE_URL:?zorunlu}
+  Poyra__CheckoutBaseUrl: ${POYRA_CHECKOUT_BASE_URL:?zorunlu}
+  Platform__AdminKey: ${POYRA_PLATFORM_ADMIN_KEY:?zorunlu}
+  Poyra__Smtp__Host: ${SMTP_HOST:-}
+  Poyra__Smtp__Port: ${SMTP_PORT:-587}
+  Poyra__Smtp__Username: ${SMTP_USERNAME:-}
+  Poyra__Smtp__Password: ${SMTP_PASSWORD:-}
+  Poyra__Smtp__From: ${SMTP_FROM:-}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: poyra              # sahip rol — YALNIZ migration koşar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?zorunlu}
+      POSTGRES_DB: ${POSTGRES_DB:-poyra}
+    volumes:
+      # Adlandırılmış birim, bind mount DEĞİL: Dokploy'un Volume Backups özelliği
+      # yalnız adlandırılmış birimleri yedekleyebiliyor.
+      #
+      # DİKKAT — yol /var/lib/postgresql, /data DEĞİL: Postgres 18 verisini sürüme özel
+      # bir alt dizinde ($PGDATA=/var/lib/postgresql/18/docker) tutar. /var/lib/postgresql/data'ya
+      # bağlanan birim "kullanılmayan" sayılır; imaj veri kaybını önlemek için AÇILMAYI REDDEDER.
+      - poyra_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poyra -d ${POSTGRES_DB:-poyra}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # dokploy-network'te DEĞİL ve port yayınlamıyor: veritabanına yalnız yığının
+    # kendi servisleri ulaşır, Traefik'in bile yolu yoktur.
+
+  # poyra_app rolünü HER dağıtımda kurar ve parolasını env'e eşitler.
+  #
+  # Neden initdb değil: initdb betikleri YALNIZ birim boşken koşar. Bu yüzden
+  #   * parola sonradan değişirse veritabanındaki eski parola kalır → uygulama 28P01 alır,
+  #   * ilk dağıtım yarım kaldıysa rol hiç yaratılmamış olur ve bir daha yaratılmaz.
+  # Bu iş her dağıtımda koşar ve idempotenttir: hangi durumdan başlarsa başlasın rolü
+  # doğru duruma getirir. migrate ondan SONRA koşar, yani ALTER DEFAULT PRIVILEGES
+  # tablolar yaratılmadan önce yerine oturur.
+  rol-kur:
+    image: postgres:18-alpine
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGUSER: poyra                     # sahip rol — rol yönetimi yetkisi onda
+      PGPASSWORD: ${POSTGRES_PASSWORD:?zorunlu}
+      PGDATABASE: ${POSTGRES_DB:-poyra}
+      POYRA_APP_PASSWORD: ${POYRA_APP_PASSWORD:?zorunlu}
+    configs:
+      - source: rol_kur_sql
+        target: /rol-kur.sql
+    # Parola komut satırına YAZILMAZ (ps çıktısında görünürdü); psql'e değişkenle geçer.
+    entrypoint: ["sh", "-c"]
+    command: ['psql -v ON_ERROR_STOP=1 -v app_password="$$POYRA_APP_PASSWORD" -f /rol-kur.sql']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Migration'lar ayrı bir işte koşar ve biter. Üç uygulama da bunun BAŞARIYLA bitmesini
+  # bekler; açılışta migrate etmek, kopyalar aynı anda kalkarken yarışa ve yarım şemaya
+  # yol açardı.
+  migrate:
+    image: ghcr.io/dakicksoft/poyra-api:${POYRA_SURUM:?zorunlu}
+    restart: "no"
+    environment:
+      <<: *app-env
+      Database__AutoMigrate: "true"
+      Poyra__MigrateOnly: "true"
+    depends_on:
+      rol-kur:
+        condition: service_completed_successfully
+
+  api:
+    image: ghcr.io/dakicksoft/poyra-api:${POYRA_SURUM:?zorunlu}
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      Database__AutoMigrate: "false"    # şemayı migrate işi kurar
+      # Demo verisi yalnız API'yi ilgilendirir: panel ve checkout demo parolasını görmez.
+      Poyra__Demo__Enabled: ${POYRA_DEMO:-false}
+      Poyra__Demo__Email: ${POYRA_DEMO_EMAIL:-}
+      Poyra__Demo__Password: ${POYRA_DEMO_PASSWORD:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [default, dokploy-network]
+
+  panel:
+    image: ghcr.io/dakicksoft/poyra-panel:${POYRA_SURUM:?zorunlu}
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [default, dokploy-network]
+
+  checkout:
+    image: ghcr.io/dakicksoft/poyra-checkout:${POYRA_SURUM:?zorunlu}
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [default, dokploy-network]
+
+  # Veritabanı gezgini — DIŞARIYA AÇIK.
+  #
+  # Sahip rol `poyra` ile bağlanır ve YAZMA AÇIKTIR (bilinçli tercih). O rol postgres
+  # imajında superuser'dır, yani RLS'i — FORCE olanlar dahil — aşar: tüm işyerlerinin
+  # verisi tek ekranda görünür ve DEĞİŞTİRİLEBİLİR.
+  #
+  # Bu yüzden iki kilit zorunlu tutuluyor:
+  #   * HTTP basic auth — PGWEB_USER/PGWEB_PASSWORD tanımsızsa yığın hiç açılmaz.
+  #   * --lock-session — pgweb normalde kullanıcıya "bağlantı dizesi gir" ekranı açar;
+  #     bu bayrak olmadan arayüz, ağdaki BAŞKA veritabanlarına atlamak için kullanılabilir.
+  pgweb:
+    image: sosedoff/pgweb:0.17.0
+    restart: unless-stopped
+    environment:
+      # Parolada URL'de anlamlı karakter olmamalı (@ : / ?); anahtar-uret.sh zaten temizliyor.
+      PGWEB_DATABASE_URL: "postgres://poyra:${POSTGRES_PASSWORD:?zorunlu}@postgres:5432/${POSTGRES_DB:-poyra}?sslmode=disable"
+      PGWEB_AUTH_USER: ${PGWEB_USER:?zorunlu}
+      PGWEB_AUTH_PASS: ${PGWEB_PASSWORD:?zorunlu}
+    # Entrypoint zaten --bind=0.0.0.0 --listen=8081 içeriyor; buraya eklenenler ona eklenir.
+    command: ["--lock-session"]
+    depends_on:
+      postgres:
+        condition: service_healthy   # migrate'i BEKLEMEZ: şema bozuksa da açılıp bakılabilmeli
+    networks: [default, dokploy-network]
+
+volumes:
+  poyra_pgdata:
+
+# İKİ ağ birden gerekiyor — en kolay düşülen tuzak burası:
+#   default         → postgres'e ulaşmak için (yığının kendi ağı)
+#   dokploy-network → Traefik'in konteynere ulaşması, yani alan adları için
+# Bir servise yalnız dokploy-network yazılırsa o servis default ağdan DÜŞER ve
+# veritabanını göremez; belirti de "alan adı çalışmıyor" gibi görünmez.
+networks:
+  dokploy-network:
+    external: true
+
+# Rol kurulum betiği — docker/initdb/01-app-role.sql'in idempotent hâli.
+# Oradaki yetkiler değişirse burası da güncellenmeli.
+#
+# \gexec: üstteki SELECT bir satır döndürürse onu SQL olarak koşar. Postgres'te
+# "CREATE ROLE IF NOT EXISTS" yoktur; dolar tırnaklı DO bloğu ise compose'un $ kaçırma
+# kurallarıyla çakışırdı — bu yüzden \gexec tercih edildi.
+#
+# $$ ile kaçırılan değişkeni compose YORUMLAMAZ, kabuğa tek $ olarak geçer.
+configs:
+  rol_kur_sql:
+    content: |
+      SELECT 'CREATE ROLE poyra_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS'
+      WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'poyra_app')
+      \gexec
+
+      GRANT USAGE ON SCHEMA public TO poyra_app;
+
+      ALTER DEFAULT PRIVILEGES FOR ROLE poyra IN SCHEMA public
+          GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO poyra_app;
+
+      ALTER DEFAULT PRIVILEGES FOR ROLE poyra IN SCHEMA public
+          GRANT USAGE, SELECT ON SEQUENCES TO poyra_app;
+
+      ALTER ROLE poyra_app WITH PASSWORD :'app_password';

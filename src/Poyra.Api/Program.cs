@@ -209,6 +209,24 @@ if (app.Configuration.GetValue<bool>("Poyra:MigrateOnly"))
 
 await DatabaseRoleGuard.EnsureNotPrivilegedAsync(connectionString, app.Environment, app.Logger);
 
+// Demo verisi: yalnız bayrak açıkken ve veritabanında HİÇ işyeri yokken. Kilit,
+// birden çok kopya aynı anda kalkarsa yalnız birinin tohumlamasını sağlar.
+// Hata çıkarsa açılış sürer — demo verisi uygulamayı düşürmeye değmez.
+var demoOptions = app.Configuration.GetSection(DemoSeedOptions.Section).Get<DemoSeedOptions>()
+                  ?? new DemoSeedOptions();
+
+if (demoOptions.Enabled)
+{
+    await using var demoScope = app.Services.CreateAsyncScope();
+    await DemoDataWriter.RunLockedAsync(connectionString, async () =>
+        await DemoDataSeeder.SeedAsync(
+            demoOptions,
+            ct => DemoDataWriter.TenantExistsAsync(demoScope.ServiceProvider, ct),
+            ct => DemoDataWriter.WriteAsync(demoScope.ServiceProvider, demoOptions, app.Logger, ct),
+            app.Logger),
+        CancellationToken.None);
+}
+
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseMiddleware<AuditMiddleware>();
 app.UseMiddleware<TenantResolutionMiddleware>();
