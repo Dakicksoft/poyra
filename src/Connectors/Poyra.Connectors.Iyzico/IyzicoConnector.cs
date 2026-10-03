@@ -23,8 +23,8 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
     public const string ConnectorKey = "iyzico";
     public const string HttpClientName = "poyra-iyzico";
 
-    private const string BaslatYolu = "/payment/3dsecure/initialize";
-    private const string TamamlaYolu = "/payment/3dsecure/auth";
+    private const string InitPath = "/payment/3dsecure/initialize";
+    private const string CompletePath = "/payment/3dsecure/auth";
 
     public string Key => ConnectorKey;
 
@@ -53,8 +53,8 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
         DirectPaymentRequest request, string callbackUrl, ConnectorCredentials credentials,
         CancellationToken ct)
     {
-        var tutar = IyzicoMessages.Price(request.AmountMinor);
-        var alici = new
+        var amount = IyzicoMessages.Price(request.AmountMinor);
+        var buyer = new
         {
             id = request.OrderId,
             name = "Poyra",
@@ -66,14 +66,14 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
             country = "Turkey",
             ip = request.CustomerIp ?? "0.0.0.0",
         };
-        var adres = new { contactName = "Poyra Musteri", city = "Istanbul", country = "Turkey", address = "Bilinmiyor" };
+        var url = new { contactName = "Poyra Musteri", city = "Istanbul", country = "Turkey", address = "Bilinmiyor" };
 
-        var govde = new
+        var body = new
         {
             locale = "tr",
             conversationId = request.OrderId,
-            price = tutar,
-            paidPrice = tutar,
+            price = amount,
+            paidPrice = amount,
             currency = request.Currency.ToUpperInvariant(),
             installment = Math.Max(1, request.Installments),
             basketId = request.OrderId,
@@ -89,9 +89,9 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
                 cvc = request.Card.Cvv,
                 registerCard = 0,
             },
-            buyer = alici,
-            shippingAddress = adres,
-            billingAddress = adres,
+            buyer = buyer,
+            shippingAddress = url,
+            billingAddress = url,
             basketItems = new[]
             {
                 new
@@ -100,23 +100,23 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
                     name = request.Description ?? "Siparis",
                     category1 = "Genel",
                     itemType = "VIRTUAL",
-                    price = tutar,
+                    price = amount,
                 },
             },
         };
 
-        using var yanit = await GonderAsync(credentials, BaslatYolu, govde, ct);
-        var kok = yanit.RootElement;
+        using var response = await SendAsync(credentials, InitPath, body, ct);
+        var root = response.RootElement;
 
-        if (Metin(kok, "status") != "success")
+        if (Text(root, "status") != "success")
             throw new ConnectorUnavailableException(
-                $"İyzico 3D başlatma reddetti: {Metin(kok, "errorCode")} {Metin(kok, "errorMessage")}");
+                $"İyzico 3D başlatma reddetti: {Text(root, "errorCode")} {Text(root, "errorMessage")}");
 
-        var form = IyzicoMessages.FormuCoz(Metin(kok, "threeDSHtmlContent"));
-        if (form is not { } cikan)
+        var form = IyzicoMessages.DecodeForm(Text(root, "threeDSHtmlContent"));
+        if (form is not { } extracted)
             throw new ConnectorUnavailableException("İyzico 3D yanıtında beklenen form yok.");
 
-        return new HostedPaymentForm(cikan.ActionUrl, cikan.Fields);
+        return new HostedPaymentForm(extracted.ActionUrl, extracted.Fields);
     }
 
     /// <summary>
@@ -152,7 +152,7 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
                 IyzicoMessages.UnifiedError(null, mdStatus), mdStatus,
                 "3D kimlik doğrulaması başarısız.");
 
-        using var yanit = await GonderAsync(credentials, TamamlaYolu, new
+        using var response = await SendAsync(credentials, CompletePath, new
         {
             locale = "tr",
             conversationId = orderId,
@@ -160,45 +160,45 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
             conversationData = form.GetValueOrDefault("conversationData"),
         }, ct);
 
-        var kok = yanit.RootElement;
-        if (Metin(kok, "status") != "success")
+        var root = response.RootElement;
+        if (Text(root, "status") != "success")
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                IyzicoMessages.UnifiedError(Metin(kok, "errorCode"), mdStatus),
-                Metin(kok, "errorCode"), Metin(kok, "errorMessage"));
+                IyzicoMessages.UnifiedError(Text(root, "errorCode"), mdStatus),
+                Text(root, "errorCode"), Text(root, "errorMessage"));
 
-        var kalem = kok.TryGetProperty("itemTransactions", out var kalemler)
-                    && kalemler.ValueKind == JsonValueKind.Array && kalemler.GetArrayLength() > 0
-            ? kalemler[0]
+        var item = root.TryGetProperty("itemTransactions", out var items)
+                    && items.ValueKind == JsonValueKind.Array && items.GetArrayLength() > 0
+            ? items[0]
             : default;
 
         return new HostedCallbackResult(
             true, orderId,
-            AuthCode: Metin(kok, "authCode") ?? paymentId,
+            AuthCode: Text(root, "authCode") ?? paymentId,
             // İade/iptal paymentTransactionId ile yapılır — referansı burada saklıyoruz
-            ConnectorTxnId: Metin(kalem, "paymentTransactionId") ?? paymentId,
-            MaskedPan: Metin(kok, "binNumber") is { } bin ? bin + "******" : null,
-            CardBank: Metin(kok, "cardAssociation"),
-            UnifiedErrors.None, Metin(kok, "status"), null);
+            ConnectorTxnId: Text(item, "paymentTransactionId") ?? paymentId,
+            MaskedPan: Text(root, "binNumber") is { } bin ? bin + "******" : null,
+            CardBank: Text(root, "cardAssociation"),
+            UnifiedErrors.None, Text(root, "status"), null);
     }
 
     public async Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
     {
-        using var yanit = await GonderAsync(credentials, "/payment/cancel", new
+        using var response = await SendAsync(credentials, "/payment/cancel", new
         {
             locale = "tr",
             conversationId = reference.OrderId,
             paymentId = reference.ConnectorTxnId,
         }, ct);
 
-        return SonucaCevir(yanit.RootElement, reference.ConnectorTxnId);
+        return ToOperationResult(response.RootElement, reference.ConnectorTxnId);
     }
 
     public async Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
     {
-        using var yanit = await GonderAsync(credentials, "/payment/refund", new
+        using var response = await SendAsync(credentials, "/payment/refund", new
         {
             locale = "tr",
             conversationId = request.OrderId,
@@ -207,50 +207,50 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
             currency = request.Currency.ToUpperInvariant(),
         }, ct);
 
-        return SonucaCevir(yanit.RootElement, request.ConnectorTxnId);
+        return ToOperationResult(response.RootElement, request.ConnectorTxnId);
     }
 
     // ---- İç yardımcılar --------------------------------------------------------
 
-    private static ConnectorOperationResult SonucaCevir(JsonElement kok, string? txnId)
-        => Metin(kok, "status") == "success"
+    private static ConnectorOperationResult ToOperationResult(JsonElement root, string? txnId)
+        => Text(root, "status") == "success"
             ? ConnectorOperationResult.Ok(txnId)
             : ConnectorOperationResult.Fail(
-                IyzicoMessages.UnifiedError(Metin(kok, "errorCode"), null),
-                Metin(kok, "errorCode"), Metin(kok, "errorMessage"));
+                IyzicoMessages.UnifiedError(Text(root, "errorCode"), null),
+                Text(root, "errorCode"), Text(root, "errorMessage"));
 
-    private async Task<JsonDocument> GonderAsync(
-        ConnectorCredentials credentials, string yol, object govde, CancellationToken ct)
+    private async Task<JsonDocument> SendAsync(
+        ConnectorCredentials credentials, string path, object body, CancellationToken ct)
     {
-        var json = JsonSerializer.Serialize(govde);
-        var rastgele = IyzicoMessages.RastgeleAnahtar();
+        var json = JsonSerializer.Serialize(body);
+        var random = IyzicoMessages.RandomKey();
 
-        using var istek = new HttpRequestMessage(
-            HttpMethod.Post, credentials.Require("gateway_base").TrimEnd('/') + yol)
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, credentials.Require("gateway_base").TrimEnd('/') + path)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
 
         // İmza YOLU da kapsar: aynı gövdeyi başka bir uca göndermek doğrulamayı kırar.
-        istek.Headers.TryAddWithoutValidation("Authorization", IyzicoMessages.YetkiBasligi(
-            credentials.Require("api_key"), credentials.Require("secret_key"), yol, json, rastgele));
-        istek.Headers.TryAddWithoutValidation("x-iyzi-rnd", rastgele);
+        request.Headers.TryAddWithoutValidation("Authorization", IyzicoMessages.AuthorizationHeader(
+            credentials.Require("api_key"), credentials.Require("secret_key"), path, json, random));
+        request.Headers.TryAddWithoutValidation("x-iyzi-rnd", random);
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.SendAsync(istek, ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.SendAsync(request, ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"İyzico {yol} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"İyzico {path} → {(int)response.StatusCode}.");
 
-            return JsonDocument.Parse(metin);
+            return JsonDocument.Parse(text);
         }
         catch (HttpRequestException ex)
         {
             // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"İyzico {yol} ucuna ulaşılamadı.", ex);
+            throw new ConnectorUnavailableException($"İyzico {path} ucuna ulaşılamadı.", ex);
         }
         catch (JsonException ex)
         {
@@ -258,12 +258,12 @@ public sealed class IyzicoConnector(IHttpClientFactory httpClientFactory) : IPay
         }
     }
 
-    private static string? Metin(JsonElement element, string ad)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(ad, out var deger)
-            ? deger.ValueKind switch
+    private static string? Text(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
             {
-                JsonValueKind.String => deger.GetString(),
-                JsonValueKind.Number => deger.ToString(),
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
                 _ => null,
             }
             : null;

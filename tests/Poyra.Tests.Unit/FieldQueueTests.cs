@@ -148,7 +148,7 @@ public sealed class FieldQueueTests : IDisposable
         // Ama SİLİNMEZ: temsilci neyin neden gitmediğini görebilmeli
         var rejected = (await _queue.RejectedAsync()).ShouldHaveSingleItem();
         rejected.ClientOpId.ShouldBe(bad.ClientOpId);
-        rejected.RejectReason.ShouldContain("Tutar");
+        rejected.RejectReason.ShouldNotBeNull().ShouldContain("Tutar");
     }
 
     [Fact]
@@ -251,7 +251,7 @@ public sealed class FieldSyncClientTests : IDisposable
         var result = await Client(handler).RunAsync("bayi-01", "cihaz-A");
 
         result.Reachable.ShouldBeTrue();
-        result.Error.ShouldContain("500");
+        result.Error.ShouldNotBeNull().ShouldContain("500");
 
         // Yanlış bir sunucu hatası yüzünden günün tahsilatını silmek, beklemekten
         // çok daha pahalıdır
@@ -298,7 +298,7 @@ public sealed class FieldSyncClientTests : IDisposable
 
         // Hata YUTULMAZ, metin olarak görünür
         result.Reachable.ShouldBeFalse();
-        result.Error.ShouldContain("InvalidOperationException");
+        result.Error.ShouldNotBeNull().ShouldContain("InvalidOperationException");
 
         // Ve kayıt kuyrukta DURUR
         (await _queue.PendingAsync()).ShouldHaveSingleItem().AmountMinor.ShouldBe(60_000);

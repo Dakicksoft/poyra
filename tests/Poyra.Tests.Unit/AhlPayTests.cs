@@ -43,12 +43,12 @@ public sealed class AhlPayTests
         // Sorgu yanıtında isSuccess=true olsa BİLE txnStatus "VOID" olabilir: sağlayıcının
         // örnek yanıtı tam olarak öyle. Yalnız isSuccess'e bakmak iptal edilmiş bir işlemi
         // tahsilat saymak olurdu.
-        AhlPayMessages.TahsilEdildi(durum).ShouldBe(beklenen);
+        AhlPayMessages.IsCaptured(durum).ShouldBe(beklenen);
     }
 
     [Fact]
     public void Rastgele_deger_her_cagrida_degismeli()
-        => Enumerable.Range(0, 30).Select(_ => AhlPayMessages.Rastgele()).ShouldBeUnique();
+        => Enumerable.Range(0, 30).Select(_ => AhlPayMessages.RandomNonce()).ShouldBeUnique();
 
     [Fact]
     public void Donus_dogrulanmadan_BASARI_sayilmamali()

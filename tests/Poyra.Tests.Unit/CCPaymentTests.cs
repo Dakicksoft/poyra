@@ -23,7 +23,7 @@ public sealed class CCPaymentImzaTests
     {
         var metin = "149.90|1|TRY|merchant-1|att_0001";
 
-        CCPaymentMessages.Coz(CCPaymentMessages.Imzala(metin, Sir), Sir).ShouldBe(metin);
+        CCPaymentMessages.Decrypt(CCPaymentMessages.Sign(metin, Sir), Sir).ShouldBe(metin);
     }
 
     [Fact]
@@ -31,16 +31,16 @@ public sealed class CCPaymentImzaTests
     {
         // IV ve tuz rastgele: imza "yeniden üretip eşitleyerek" doğrulanamaz, çözülerek
         // doğrulanır. Bu test o tasarımı sabitler — biri deterministik hâle getirirse kırılır.
-        var a = CCPaymentMessages.Imzala("x|y", Sir);
-        var b = CCPaymentMessages.Imzala("x|y", Sir);
+        var a = CCPaymentMessages.Sign("x|y", Sir);
+        var b = CCPaymentMessages.Sign("x|y", Sir);
 
         a.ShouldNotBe(b);
-        CCPaymentMessages.Coz(a, Sir).ShouldBe(CCPaymentMessages.Coz(b, Sir));
+        CCPaymentMessages.Decrypt(a, Sir).ShouldBe(CCPaymentMessages.Decrypt(b, Sir));
     }
 
     [Fact]
     public void Yanlis_sirla_cozulememeli()
-        => CCPaymentMessages.Coz(CCPaymentMessages.Imzala("x|y", Sir), "baska-sir").ShouldBeNull();
+        => CCPaymentMessages.Decrypt(CCPaymentMessages.Sign("x|y", Sir), "baska-sir").ShouldBeNull();
 
     [Theory]
     [InlineData("")]
@@ -51,7 +51,7 @@ public sealed class CCPaymentImzaTests
     public void Bozuk_imza_null_donmeli_istisna_ATMAMALI(string imza)
     {
         // İstisna atsaydı sahte bir dönüş 500'e dönüşür ve gerçek hatadan ayırt edilemezdi.
-        CCPaymentMessages.Coz(imza, Sir).ShouldBeNull();
+        CCPaymentMessages.Decrypt(imza, Sir).ShouldBeNull();
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class CCPaymentImzaTests
     {
         // '/' değeri form alanında ve URL'de bozar; platform __ ile taşır.
         for (var i = 0; i < 40; i++)
-            CCPaymentMessages.Imzala($"deneme|{i}", Sir).ShouldNotContain("/");
+            CCPaymentMessages.Sign($"deneme|{i}", Sir).ShouldNotContain("/");
     }
 
     [Theory]
@@ -80,7 +80,7 @@ public sealed class CCPaymentImzaTests
             </form></body></html>
             """;
 
-        var form = CCPaymentMessages.FormuCikar(html);
+        var form = CCPaymentMessages.ExtractForm(html);
 
         form.ShouldNotBeNull();
         form!.Value.ActionUrl.ShouldBe("https://3ds.saglayici.test/redirect");
@@ -90,7 +90,7 @@ public sealed class CCPaymentImzaTests
 
     [Fact]
     public void Form_yoksa_null_donmeli()
-        => CCPaymentMessages.FormuCikar("<html><body>hata</body></html>").ShouldBeNull();
+        => CCPaymentMessages.ExtractForm("<html><body>hata</body></html>").ShouldBeNull();
 }
 
 public sealed class CCPaymentDonusTests
@@ -115,7 +115,7 @@ public sealed class CCPaymentDonusTests
             ["invoice_id"] = "att_0001",
             ["md_status"] = "1",
             ["order_id"] = "SP-77",
-            ["hash_key"] = CCPaymentMessages.Imzala("att_0001|1|TRY", "app-secret-9F3A"),
+            ["hash_key"] = CCPaymentMessages.Sign("att_0001|1|TRY", "app-secret-9F3A"),
         };
 
         Konnektor().ParseAndValidateCallback(form, Kimlik).Success.ShouldBeFalse();
@@ -129,7 +129,7 @@ public sealed class CCPaymentDonusTests
         {
             ["invoice_id"] = "att_0001",
             ["md_status"] = "1",
-            ["hash_key"] = CCPaymentMessages.Imzala("att_BASKA|1|TRY", "app-secret-9F3A"),
+            ["hash_key"] = CCPaymentMessages.Sign("att_BASKA|1|TRY", "app-secret-9F3A"),
         };
 
         var sonuc = Konnektor().ParseAndValidateCallback(form, Kimlik);

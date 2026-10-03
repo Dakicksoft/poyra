@@ -43,70 +43,70 @@ public static class BoaMessages
     /// tahsilatı kesinleştiren çağrı budur. Kök eleman bankaya göre değişir.
     /// </summary>
     public static string ProvisionRequestXml(
-        string kokEleman, string ekVeriEleman, string merchantId, string customerId, string userName,
+        string rootElement, string extraDataElement, string merchantId, string customerId, string userName,
         string merchantOrderId, string amount, int installmentCount, string md, string hashData)
         => $"""
             <?xml version="1.0" encoding="utf-8"?>
-            <{kokEleman} xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+            <{rootElement} xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
               <APIVersion>1.0.0</APIVersion>
-              <HashData>{Kacir(hashData)}</HashData>
-              <MerchantId>{Kacir(merchantId)}</MerchantId>
-              <CustomerId>{Kacir(customerId)}</CustomerId>
-              <UserName>{Kacir(userName)}</UserName>
+              <HashData>{EscapeXml(hashData)}</HashData>
+              <MerchantId>{EscapeXml(merchantId)}</MerchantId>
+              <CustomerId>{EscapeXml(customerId)}</CustomerId>
+              <UserName>{EscapeXml(userName)}</UserName>
               <TransactionType>Sale</TransactionType>
               <InstallmentCount>{installmentCount}</InstallmentCount>
-              <Amount>{Kacir(amount)}</Amount>
+              <Amount>{EscapeXml(amount)}</Amount>
               <CurrencyCode>{TryCurrencyCode}</CurrencyCode>
-              <MerchantOrderId>{Kacir(merchantOrderId)}</MerchantOrderId>
+              <MerchantOrderId>{EscapeXml(merchantOrderId)}</MerchantOrderId>
               <TransactionSecurity>3</TransactionSecurity>
-              <{ekVeriEleman}>
+              <{extraDataElement}>
                 <AdditionalData>
                   <Key>MD</Key>
-                  <Data>{Kacir(md)}</Data>
+                  <Data>{EscapeXml(md)}</Data>
                 </AdditionalData>
-              </{ekVeriEleman}>
-            </{kokEleman}>
+              </{extraDataElement}>
+            </{rootElement}>
             """;
 
 
-    public static string IptalXml(
-        string kokEleman, string merchantId, string customerId, string userName,
+    public static string CancelXml(
+        string rootElement, string merchantId, string customerId, string userName,
         string hashedPassword, string merchantOrderId, string orderId, string amount, string hashData)
-        => Zarf(kokEleman, hashData, merchantId, customerId, userName, hashedPassword, $"""
-              <MerchantOrderId>{Kacir(merchantOrderId)}</MerchantOrderId>
-              <Amount>{Kacir(amount)}</Amount>
-              <OrderId>{Kacir(orderId)}</OrderId>
+        => Envelope(rootElement, hashData, merchantId, customerId, userName, hashedPassword, $"""
+              <MerchantOrderId>{EscapeXml(merchantOrderId)}</MerchantOrderId>
+              <Amount>{EscapeXml(amount)}</Amount>
+              <OrderId>{EscapeXml(orderId)}</OrderId>
               <PaymentType>1</PaymentType>
             """);
 
 
-    public static string KismiIadeXml(
-        string kokEleman, string merchantId, string customerId, string userName,
+    public static string PartialRefundXml(
+        string rootElement, string merchantId, string customerId, string userName,
         string hashedPassword, string merchantOrderId, string orderId, string amount, string hashData)
-        => Zarf(kokEleman, hashData, merchantId, customerId, userName, hashedPassword, $"""
-              <OrderId>{Kacir(orderId)}</OrderId>
-              <MerchantOrderId>{Kacir(merchantOrderId)}</MerchantOrderId>
-              <Amount>{Kacir(amount)}</Amount>
-              <DisplayAmount>{Kacir(amount)}</DisplayAmount>
+        => Envelope(rootElement, hashData, merchantId, customerId, userName, hashedPassword, $"""
+              <OrderId>{EscapeXml(orderId)}</OrderId>
+              <MerchantOrderId>{EscapeXml(merchantOrderId)}</MerchantOrderId>
+              <Amount>{EscapeXml(amount)}</Amount>
+              <DisplayAmount>{EscapeXml(amount)}</DisplayAmount>
             """);
 
-    private static string Zarf(
-        string kokEleman, string hashData, string merchantId, string customerId,
-        string userName, string hashedPassword, string govde)
+    private static string Envelope(
+        string rootElement, string hashData, string merchantId, string customerId,
+        string userName, string hashedPassword, string body)
         => $"""
             <?xml version="1.0" encoding="utf-8"?>
-            <{kokEleman} xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-              <HashData>{Kacir(hashData)}</HashData>
-              <MerchantId>{Kacir(merchantId)}</MerchantId>
+            <{rootElement} xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+              <HashData>{EscapeXml(hashData)}</HashData>
+              <MerchantId>{EscapeXml(merchantId)}</MerchantId>
               <SubMerchantId>0</SubMerchantId>
-              <CustomerId>{Kacir(customerId)}</CustomerId>
-              <UserName>{Kacir(userName)}</UserName>
-              <HashPassword>{Kacir(hashedPassword)}</HashPassword>
-            {govde}
-            </{kokEleman}>
+              <CustomerId>{EscapeXml(customerId)}</CustomerId>
+              <UserName>{EscapeXml(userName)}</UserName>
+              <HashPassword>{EscapeXml(hashedPassword)}</HashPassword>
+            {body}
+            </{rootElement}>
             """;
 
-    private static string Kacir(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
+    private static string EscapeXml(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
 
     /// <summary>
     /// Dönüş başarılı mı: <c>ResponseCode</c> "00" olmalı.
@@ -124,20 +124,20 @@ public static class BoaMessages
     /// İLKİ kazanır; aradığımız alanlar köke yakındır. Bozuk/boş gövde boş sözlük döner —
     /// çağıran "onaylanmadı" sayar (fail closed).
     /// </summary>
-    public static IReadOnlyDictionary<string, string> Oku(string xml)
+    public static IReadOnlyDictionary<string, string> Parse(string xml)
     {
-        var sonuc = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(xml)) return sonuc;
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(xml)) return result;
 
         try
         {
-            var kok = XDocument.Parse(xml).Root;
-            if (kok is null) return sonuc;
+            var root = XDocument.Parse(xml).Root;
+            if (root is null) return result;
 
-            foreach (var dugum in kok.DescendantsAndSelf())
+            foreach (var node in root.DescendantsAndSelf())
             {
-                if (dugum.HasElements) continue;
-                sonuc.TryAdd(dugum.Name.LocalName, dugum.Value.Trim());
+                if (node.HasElements) continue;
+                result.TryAdd(node.Name.LocalName, node.Value.Trim());
             }
         }
         catch (System.Xml.XmlException)
@@ -146,7 +146,7 @@ public static class BoaMessages
             // yanlış ayrıştırılmış bir "00" üretmekten iyidir.
         }
 
-        return sonuc;
+        return result;
     }
 
     public static string UnifiedError(string? responseCode) => responseCode switch

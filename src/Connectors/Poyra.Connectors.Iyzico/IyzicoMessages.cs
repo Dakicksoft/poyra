@@ -20,13 +20,13 @@ public static class IyzicoMessages
     /// </summary>
     public static string Price(long amountMinor)
     {
-        var deger = amountMinor / 100m;
-        var metin = deger.ToString("0.00", CultureInfo.InvariantCulture).TrimEnd('0');
-        return metin.EndsWith('.') ? metin + "0" : metin;
+        var value = amountMinor / 100m;
+        var text = value.ToString("0.00", CultureInfo.InvariantCulture).TrimEnd('0');
+        return text.EndsWith('.') ? text + "0" : text;
     }
 
     /// <summary>Her istekte yeni üretilir; imzaya ve <c>x-iyzi-rnd</c> başlığına girer.</summary>
-    public static string RastgeleAnahtar()
+    public static string RandomKey()
         => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(12));
 
     /// <summary>
@@ -36,27 +36,27 @@ public static class IyzicoMessages
     /// Sonra "apiKey:…&amp;randomKey:…&amp;signature:…" dizesi base64'lenir.
     /// Sırayı ya da yolu değiştirmek doğrulamayı kırar.
     /// </summary>
-    public static string YetkiBasligi(string apiKey, string secretKey, string yol, string govde, string rastgele)
+    public static string AuthorizationHeader(string apiKey, string secretKey, string path, string body, string random)
     {
-        var imza = Convert.ToHexStringLower(HMACSHA256.HashData(
+        var signature = Convert.ToHexStringLower(HMACSHA256.HashData(
             Encoding.UTF8.GetBytes(secretKey),
-            Encoding.UTF8.GetBytes(rastgele + yol + govde)));
+            Encoding.UTF8.GetBytes(random + path + body)));
 
-        var yetki = $"apiKey:{apiKey}&randomKey:{rastgele}&signature:{imza}";
-        return "IYZWSv2 " + Convert.ToBase64String(Encoding.UTF8.GetBytes(yetki));
+        var authorization = $"apiKey:{apiKey}&randomKey:{random}&signature:{signature}";
+        return "IYZWSv2 " + Convert.ToBase64String(Encoding.UTF8.GetBytes(authorization));
     }
 
     /// <summary>
     /// 3D adımı base64 kodlu HTML olarak döner; çözülüp içindeki form çıkarılır.
     /// Bozuk base64 <c>null</c> döner — çağıran bunu "sağlayıcı beklenen yanıtı vermedi" sayar.
     /// </summary>
-    public static (string ActionUrl, Dictionary<string, string> Fields)? FormuCoz(string? base64Html)
+    public static (string ActionUrl, Dictionary<string, string> Fields)? DecodeForm(string? base64Html)
     {
         if (string.IsNullOrWhiteSpace(base64Html)) return null;
 
         try
         {
-            return ConnectorHtml.FormuCikar(Encoding.UTF8.GetString(Convert.FromBase64String(base64Html)));
+            return ConnectorHtml.ExtractForm(Encoding.UTF8.GetString(Convert.FromBase64String(base64Html)));
         }
         catch (FormatException)
         {

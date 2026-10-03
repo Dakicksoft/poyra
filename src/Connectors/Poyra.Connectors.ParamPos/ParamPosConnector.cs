@@ -50,10 +50,10 @@ public sealed class ParamPosConnector(IHttpClientFactory httpClientFactory) : IP
         DirectPaymentRequest request, string callbackUrl, ConnectorCredentials credentials,
         CancellationToken ct)
     {
-        var tutar = ParamPosMessages.Amount(request.AmountMinor);
-        var taksit = Math.Max(1, request.Installments).ToString();
+        var amount = ParamPosMessages.Amount(request.AmountMinor);
+        var installment = Math.Max(1, request.Installments).ToString();
 
-        var alanlar = new Dictionary<string, string>(StringComparer.Ordinal)
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["KK_Sahibi"] = request.Card.HolderName ?? "POYRA MUSTERI",
             ["KK_No"] = request.Card.Pan,
@@ -65,32 +65,32 @@ public sealed class ParamPosConnector(IHttpClientFactory httpClientFactory) : IP
             ["Basarili_URL"] = callbackUrl,
             ["Siparis_ID"] = request.OrderId,
             ["Siparis_Aciklama"] = request.Description ?? request.OrderId,
-            ["Taksit"] = taksit,
-            ["Islem_Tutar"] = tutar,
-            ["Toplam_Tutar"] = tutar,
+            ["Taksit"] = installment,
+            ["Islem_Tutar"] = amount,
+            ["Toplam_Tutar"] = amount,
             ["Islem_Hash"] = ParamPosMessages.RequestHash(
                 credentials.Require("client_code"), credentials.Require("guid"),
-                taksit, tutar, tutar, request.OrderId),
+                installment, amount, amount, request.OrderId),
             ["Islem_Guvenlik_Tip"] = "3D",
             ["Islem_ID"] = string.Empty,
             ["IPAdr"] = request.CustomerIp ?? "0.0.0.0",
             ["Ref_URL"] = callbackUrl,
         };
 
-        var yanit = await CagirAsync(credentials, "TP_WMD_UCD", alanlar, ct);
+        var response = await CallAsync(credentials, "TP_WMD_UCD", fields, ct);
 
-        if (!ParamPosMessages.Basarili(yanit.GetValueOrDefault("Sonuc")))
+        if (!ParamPosMessages.Succeeded(response.GetValueOrDefault("Sonuc")))
             throw new ConnectorUnavailableException(
-                $"ParamPos 3D başlatma reddetti: {yanit.GetValueOrDefault("Sonuc")} "
-                + yanit.GetValueOrDefault("Sonuc_Str"));
+                $"ParamPos 3D başlatma reddetti: {response.GetValueOrDefault("Sonuc")} "
+                + response.GetValueOrDefault("Sonuc_Str"));
 
-        var html = yanit.GetValueOrDefault("UCD_HTML");
-        var form = ConnectorHtml.FormuCikar(html ?? string.Empty);
+        var html = response.GetValueOrDefault("UCD_HTML");
+        var form = ConnectorHtml.ExtractForm(html ?? string.Empty);
 
-        if (form is not { } cikan)
+        if (form is not { } extracted)
             throw new ConnectorUnavailableException("ParamPos 3D yanıtında beklenen form yok.");
 
-        return new HostedPaymentForm(cikan.ActionUrl, cikan.Fields);
+        return new HostedPaymentForm(extracted.ActionUrl, extracted.Fields);
     }
 
     /// <summary>
@@ -99,7 +99,7 @@ public sealed class ParamPosConnector(IHttpClientFactory httpClientFactory) : IP
     /// </summary>
     public HostedCallbackResult ParseAndValidateCallback(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials)
-        => new(false, SiparisNo(form), null, null, null, null,
+        => new(false, ReadOrderId(form), null, null, null, null,
             ParamPosMessages.UnifiedError(null, form.GetValueOrDefault("mdStatus")),
             form.GetValueOrDefault("mdStatus"),
             "ParamPos dönüşü TP_WMD_Pay ile kesinleştirilmelidir.");
@@ -107,7 +107,7 @@ public sealed class ParamPosConnector(IHttpClientFactory httpClientFactory) : IP
     public async Task<HostedCallbackResult> CompleteHostedCallbackAsync(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials, CancellationToken ct)
     {
-        var orderId = SiparisNo(form);
+        var orderId = ReadOrderId(form);
         var mdStatus = form.GetValueOrDefault("mdStatus");
 
         if (mdStatus != "1")
@@ -116,94 +116,94 @@ public sealed class ParamPosConnector(IHttpClientFactory httpClientFactory) : IP
                 ParamPosMessages.UnifiedError(null, mdStatus), mdStatus,
                 "3D kimlik doğrulaması başarısız.");
 
-        var yanit = await CagirAsync(credentials, "TP_WMD_Pay", new Dictionary<string, string>(StringComparer.Ordinal)
+        var response = await CallAsync(credentials, "TP_WMD_Pay", new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["UCD_MD"] = form.GetValueOrDefault("md") ?? string.Empty,
             ["Islem_GUID"] = form.GetValueOrDefault("islemGUID") ?? string.Empty,
             ["Siparis_ID"] = orderId,
         }, ct);
 
-        var sonuc = yanit.GetValueOrDefault("Sonuc");
-        if (!ParamPosMessages.Basarili(sonuc))
+        var result = response.GetValueOrDefault("Sonuc");
+        if (!ParamPosMessages.Succeeded(result))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                ParamPosMessages.UnifiedError(sonuc, mdStatus), sonuc,
-                yanit.GetValueOrDefault("Sonuc_Str"));
+                ParamPosMessages.UnifiedError(result, mdStatus), result,
+                response.GetValueOrDefault("Sonuc_Str"));
 
         return new HostedCallbackResult(
             true, orderId,
-            AuthCode: yanit.GetValueOrDefault("Dekont_ID"),
-            ConnectorTxnId: yanit.GetValueOrDefault("Dekont_ID") ?? form.GetValueOrDefault("islemGUID"),
+            AuthCode: response.GetValueOrDefault("Dekont_ID"),
+            ConnectorTxnId: response.GetValueOrDefault("Dekont_ID") ?? form.GetValueOrDefault("islemGUID"),
             MaskedPan: null,
             CardBank: null,
-            UnifiedErrors.None, sonuc, null);
+            UnifiedErrors.None, result, null);
     }
 
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IptalIadeAsync(credentials, "IPTAL", reference.OrderId, "0,00", reference.ConnectorTxnId, ct);
+        => CancelOrRefundAsync(credentials, "IPTAL", reference.OrderId, "0,00", reference.ConnectorTxnId, ct);
 
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IptalIadeAsync(credentials, "IADE", request.OrderId,
+        => CancelOrRefundAsync(credentials, "IADE", request.OrderId,
             ParamPosMessages.Amount(request.AmountMinor), request.ConnectorTxnId, ct);
 
-    private async Task<ConnectorOperationResult> IptalIadeAsync(
-        ConnectorCredentials credentials, string durum, string orderId, string tutar,
+    private async Task<ConnectorOperationResult> CancelOrRefundAsync(
+        ConnectorCredentials credentials, string status, string orderId, string amount,
         string? txnId, CancellationToken ct)
     {
-        var yanit = await CagirAsync(credentials, "TP_Islem_Iptal_Iade_Kismi2",
+        var response = await CallAsync(credentials, "TP_Islem_Iptal_Iade_Kismi2",
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["Durum"] = durum,
+                ["Durum"] = status,
                 ["Siparis_ID"] = orderId,
-                ["Tutar"] = tutar,
+                ["Tutar"] = amount,
             }, ct);
 
-        var sonuc = yanit.GetValueOrDefault("Sonuc");
-        return ParamPosMessages.Basarili(sonuc)
+        var result = response.GetValueOrDefault("Sonuc");
+        return ParamPosMessages.Succeeded(result)
             ? ConnectorOperationResult.Ok(txnId)
             : ConnectorOperationResult.Fail(
-                ParamPosMessages.UnifiedError(sonuc, null), sonuc, yanit.GetValueOrDefault("Sonuc_Str"));
+                ParamPosMessages.UnifiedError(result, null), result, response.GetValueOrDefault("Sonuc_Str"));
     }
 
-    private static string SiparisNo(IReadOnlyDictionary<string, string> form)
+    private static string ReadOrderId(IReadOnlyDictionary<string, string> form)
         => form.GetValueOrDefault("orderId")
            ?? form.GetValueOrDefault("Siparis_ID", string.Empty);
 
-    private async Task<IReadOnlyDictionary<string, string>> CagirAsync(
-        ConnectorCredentials credentials, string islem, Dictionary<string, string> alanlar,
+    private async Task<IReadOnlyDictionary<string, string>> CallAsync(
+        ConnectorCredentials credentials, string operation, Dictionary<string, string> fields,
         CancellationToken ct)
     {
-        var zarf = ParamPosMessages.Zarf(
-            islem, credentials.Require("guid"), alanlar,
+        var envelope = ParamPosMessages.Envelope(
+            operation, credentials.Require("guid"), fields,
             credentials.Require("client_code"), credentials.Require("client_username"),
             credentials.Require("client_password"));
 
-        using var istek = new HttpRequestMessage(
+        using var request = new HttpRequestMessage(
             HttpMethod.Post, credentials.Require("gateway_base"))
         {
-            Content = new StringContent(zarf, Encoding.UTF8, "text/xml"),
+            Content = new StringContent(envelope, Encoding.UTF8, "text/xml"),
         };
 
         // SOAPAction başlığı zorunlu: olmadan sunucu hangi işlemi çağırdığımızı bilmez
-        istek.Headers.TryAddWithoutValidation("SOAPAction", ParamPosMessages.Ns + islem);
+        request.Headers.TryAddWithoutValidation("SOAPAction", ParamPosMessages.Ns + operation);
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.SendAsync(istek, ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.SendAsync(request, ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"ParamPos {islem} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"ParamPos {operation} → {(int)response.StatusCode}.");
 
-            return ParamPosMessages.Oku(metin);
+            return ParamPosMessages.Parse(text);
         }
         catch (HttpRequestException ex)
         {
             // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"ParamPos {islem} ucuna ulaşılamadı.", ex);
+            throw new ConnectorUnavailableException($"ParamPos {operation} ucuna ulaşılamadı.", ex);
         }
     }
 }

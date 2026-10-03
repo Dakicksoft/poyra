@@ -14,14 +14,14 @@ public sealed class KuveytTurkConnector(IHttpClientFactory httpClientFactory)
 
     public override string Key => ConnectorKey;
 
-    protected override string XmlKokEleman => "KuveytTurkVPosMessage";
-    protected override string XmlEkVeriEleman => "KuveytTurkVPosAdditionalData";
+    protected override string XmlRootElement => "KuveytTurkVPosMessage";
+    protected override string XmlExtraDataElement => "KuveytTurkVPosAdditionalData";
 
     public override ConnectorDescriptor Descriptor { get; } = new(
         ConnectorKey,
         "Kuveyt Türk Sanal POS (3D) — SERTİFİKASYON BEKLİYOR",
         ConnectorType.BankVirtualPos,
-        OrtakKimlikAlanlari,
+        CommonCredentialFields,
         SupportsInstallments: true,
         SupportsVoid: true,
         SupportsRefund: true,

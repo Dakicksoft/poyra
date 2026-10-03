@@ -52,11 +52,11 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
         DirectPaymentRequest request, string callbackUrl, ConnectorCredentials credentials,
         CancellationToken ct)
     {
-        var tutar = PaytenMessages.Amount(request.AmountMinor);
+        var amount = PaytenMessages.Amount(request.AmountMinor);
 
         // 1) Oturum belirteci: tutar ve dönüş adresi SUNUCUDA kayda geçer, sonraki adımda
         //    müşteri bunları değiştiremez.
-        var oturum = await SorAsync(credentials, new Dictionary<string, string>
+        var session = await QueryAsync(credentials, new Dictionary<string, string>
         {
             ["ACTION"] = "SESSIONTOKEN",
             ["SESSIONTYPE"] = "PAYMENTSESSION",
@@ -66,7 +66,7 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
             ["CUSTOMEREMAIL"] = "musteri@poyra.local",
             ["CUSTOMERIP"] = request.CustomerIp ?? "0.0.0.0",
             ["RETURNURL"] = callbackUrl,
-            ["AMOUNT"] = tutar,
+            ["AMOUNT"] = amount,
             ["CURRENCY"] = request.Currency.ToUpperInvariant(),
             // Elle kurulmuş JSON değil: açıklamada bir tırnak ya da ters eğik çizgi
             // olsaydı gövde bozulur ve istek anlaşılmaz bir hatayla reddedilirdi.
@@ -78,20 +78,20 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
                     name = request.Description ?? "Siparis",
                     description = string.Empty,
                     quantity = 1,
-                    amount = tutar,
+                    amount = amount,
                 },
             }),
         }, ct);
 
-        var belirtec = Metin(oturum.RootElement, "sessionToken");
-        if (Metin(oturum.RootElement, "responseCode") != "00" || string.IsNullOrWhiteSpace(belirtec))
+        var token = Text(session.RootElement, "sessionToken");
+        if (Text(session.RootElement, "responseCode") != "00" || string.IsNullOrWhiteSpace(token))
             throw new ConnectorUnavailableException(
-                $"Payten oturum belirteci alınamadı: {Metin(oturum.RootElement, "responseCode")} "
-                + Metin(oturum.RootElement, "errorMsg"));
+                $"Payten oturum belirteci alınamadı: {Text(session.RootElement, "responseCode")} "
+                + Text(session.RootElement, "errorMsg"));
 
         // 2) Kart verisi SUNUCUDAN sunucuya gider — tarayıcıya bastığımız HTML'de PAN olmaz.
-        var taban = credentials.Require("gateway_base").TrimEnd('/');
-        var html = await GonderAsync($"{taban}/post/sale3d/{belirtec}", new Dictionary<string, string>
+        var baseUrl = credentials.Require("gateway_base").TrimEnd('/');
+        var html = await SendAsync($"{baseUrl}/post/sale3d/{token}", new Dictionary<string, string>
         {
             ["panname"] = request.Card.HolderName ?? "POYRA MUSTERI",
             ["cardOwner"] = request.Card.HolderName ?? "POYRA MUSTERI",
@@ -102,11 +102,11 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
             ["installmentCount"] = Math.Max(1, request.Installments).ToString(),
         }, ct);
 
-        var form = ConnectorHtml.FormuCikar(html);
-        if (form is not { } cikan)
+        var form = ConnectorHtml.ExtractForm(html);
+        if (form is not { } extracted)
             throw new ConnectorUnavailableException("Payten 3D adımında beklenen form dönmedi.");
 
-        return new HostedPaymentForm(cikan.ActionUrl, cikan.Fields);
+        return new HostedPaymentForm(extracted.ActionUrl, extracted.Fields);
     }
 
     /// <summary>
@@ -118,7 +118,7 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
     {
         var orderId = form.GetValueOrDefault("merchantPaymentId", string.Empty);
 
-        if (!ImzaGecerli(form, credentials, orderId))
+        if (!IsSignatureValid(form, credentials, orderId))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
                 UnifiedErrors.SignatureInvalid, form.GetValueOrDefault("responseCode"),
@@ -136,40 +136,40 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
         var orderId = form.GetValueOrDefault("merchantPaymentId", string.Empty);
         var mdStatus = form.GetValueOrDefault("mdStatus");
 
-        if (!ImzaGecerli(form, credentials, orderId))
+        if (!IsSignatureValid(form, credentials, orderId))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
                 UnifiedErrors.SignatureInvalid, form.GetValueOrDefault("responseCode"),
                 "Payten callback imzası doğrulanamadı.");
 
         // Otorite BURASI: tarayıcının ne dediğinden bağımsız olarak sunucuya sorulur.
-        using var sorgu = await SorAsync(credentials, new Dictionary<string, string>
+        using var query = await QueryAsync(credentials, new Dictionary<string, string>
         {
             ["ACTION"] = "QUERYTRANSACTION",
             ["MERCHANTPAYMENTID"] = orderId,
         }, ct);
 
-        var islem = IlkIslem(sorgu.RootElement);
-        var kod = Metin(islem, "responseCode") ?? Metin(sorgu.RootElement, "responseCode");
+        var operation = FirstTransaction(query.RootElement);
+        var code = Text(operation, "responseCode") ?? Text(query.RootElement, "responseCode");
 
-        if (kod != "00")
+        if (code != "00")
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                PaytenMessages.UnifiedError(kod, mdStatus), kod,
-                Metin(islem, "responseMsg") ?? Metin(sorgu.RootElement, "errorMsg"));
+                PaytenMessages.UnifiedError(code, mdStatus), code,
+                Text(operation, "responseMsg") ?? Text(query.RootElement, "errorMsg"));
 
         return new HostedCallbackResult(
             true, orderId,
-            AuthCode: Metin(islem, "pgTranApprCode"),
-            ConnectorTxnId: Metin(islem, "pgTranId") ?? form.GetValueOrDefault("pgTranId"),
-            MaskedPan: Metin(islem, "cardNumberMasked"),
-            CardBank: Metin(islem, "paymentSystem"),
-            UnifiedErrors.None, kod, null);
+            AuthCode: Text(operation, "pgTranApprCode"),
+            ConnectorTxnId: Text(operation, "pgTranId") ?? form.GetValueOrDefault("pgTranId"),
+            MaskedPan: Text(operation, "cardNumberMasked"),
+            CardBank: Text(operation, "paymentSystem"),
+            UnifiedErrors.None, code, null);
     }
 
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, new Dictionary<string, string>
+        => OperationAsync(credentials, new Dictionary<string, string>
         {
             ["ACTION"] = "VOID",
             ["PGTRANID"] = reference.ConnectorTxnId ?? string.Empty,
@@ -178,7 +178,7 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
 
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, new Dictionary<string, string>
+        => OperationAsync(credentials, new Dictionary<string, string>
         {
             ["ACTION"] = "REFUND",
             ["PGTRANID"] = request.ConnectorTxnId ?? string.Empty,
@@ -188,9 +188,9 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
         }, request.ConnectorTxnId, ct);
 
 
-    private static bool ImzaGecerli(
+    private static bool IsSignatureValid(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials, string orderId)
-        => PaytenMessages.ImzaGecerli(
+        => PaytenMessages.IsSignatureValid(
             form.GetValueOrDefault("sdSha512") ?? form.GetValueOrDefault("SD_SHA512"),
             orderId,
             form.GetValueOrDefault("customerId"),
@@ -199,35 +199,35 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
             form.GetValueOrDefault("random"),
             credentials.Require("secret_key"));
 
-    private async Task<ConnectorOperationResult> IslemAsync(
-        ConnectorCredentials credentials, Dictionary<string, string> alanlar, string? txnId,
+    private async Task<ConnectorOperationResult> OperationAsync(
+        ConnectorCredentials credentials, Dictionary<string, string> fields, string? txnId,
         CancellationToken ct)
     {
-        using var yanit = await SorAsync(credentials, alanlar, ct);
-        var kod = Metin(yanit.RootElement, "responseCode");
+        using var response = await QueryAsync(credentials, fields, ct);
+        var code = Text(response.RootElement, "responseCode");
 
-        return kod == "00"
+        return code == "00"
             ? ConnectorOperationResult.Ok(txnId)
             : ConnectorOperationResult.Fail(
-                PaytenMessages.UnifiedError(kod, null), kod,
-                Metin(yanit.RootElement, "errorMsg") ?? Metin(yanit.RootElement, "responseMsg"));
+                PaytenMessages.UnifiedError(code, null), code,
+                Text(response.RootElement, "errorMsg") ?? Text(response.RootElement, "responseMsg"));
     }
 
-    private async Task<JsonDocument> SorAsync(
-        ConnectorCredentials credentials, Dictionary<string, string> alanlar, CancellationToken ct)
+    private async Task<JsonDocument> QueryAsync(
+        ConnectorCredentials credentials, Dictionary<string, string> fields, CancellationToken ct)
     {
-        var govde = new Dictionary<string, string>(alanlar, StringComparer.Ordinal)
+        var body = new Dictionary<string, string>(fields, StringComparer.Ordinal)
         {
             ["MERCHANT"] = credentials.Require("merchant"),
             ["MERCHANTUSER"] = credentials.Require("merchant_user"),
             ["MERCHANTPASSWORD"] = credentials.Require("merchant_password"),
         };
 
-        var metin = await GonderAsync(credentials.Require("gateway_base").TrimEnd('/'), govde, ct);
+        var text = await SendAsync(credentials.Require("gateway_base").TrimEnd('/'), body, ct);
 
         try
         {
-            return JsonDocument.Parse(metin);
+            return JsonDocument.Parse(text);
         }
         catch (JsonException ex)
         {
@@ -235,19 +235,19 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
         }
     }
 
-    private async Task<string> GonderAsync(
-        string adres, Dictionary<string, string> alanlar, CancellationToken ct)
+    private async Task<string> SendAsync(
+        string url, Dictionary<string, string> fields, CancellationToken ct)
     {
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.PostAsync(adres, new FormUrlEncodedContent(alanlar), ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.PostAsync(url, new FormUrlEncodedContent(fields), ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"Payten {(int)yanit.StatusCode} döndü.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"Payten {(int)response.StatusCode} döndü.");
 
-            return metin;
+            return text;
         }
         catch (HttpRequestException ex)
         {
@@ -256,25 +256,25 @@ public sealed class PaytenConnector(IHttpClientFactory httpClientFactory) : IPay
         }
     }
 
-    private static JsonElement IlkIslem(JsonElement kok)
+    private static JsonElement FirstTransaction(JsonElement root)
     {
-        if (kok.TryGetProperty("transactionList", out var liste)
-            && liste.ValueKind == JsonValueKind.Array && liste.GetArrayLength() > 0)
-            return liste[0];
+        if (root.TryGetProperty("transactionList", out var list)
+            && list.ValueKind == JsonValueKind.Array && list.GetArrayLength() > 0)
+            return list[0];
 
-        if (kok.TryGetProperty("transactions", out var digeri)
-            && digeri.ValueKind == JsonValueKind.Array && digeri.GetArrayLength() > 0)
-            return digeri[0];
+        if (root.TryGetProperty("transactions", out var other)
+            && other.ValueKind == JsonValueKind.Array && other.GetArrayLength() > 0)
+            return other[0];
 
-        return kok;
+        return root;
     }
 
-    private static string? Metin(JsonElement element, string ad)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(ad, out var deger)
-            ? deger.ValueKind switch
+    private static string? Text(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
             {
-                JsonValueKind.String => deger.GetString(),
-                JsonValueKind.Number => deger.ToString(),
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
                 _ => null,
             }
             : null;

@@ -12,25 +12,25 @@ namespace Poyra.Connectors.Abstractions;
 public static partial class ConnectorHtml
 {
     /// <summary>İlk formun action adresi ve input alanları; form yoksa <c>null</c>.</summary>
-    public static (string ActionUrl, Dictionary<string, string> Fields)? FormuCikar(string html)
+    public static (string ActionUrl, Dictionary<string, string> Fields)? ExtractForm(string html)
     {
         if (string.IsNullOrWhiteSpace(html)) return null;
 
-        var form = FormEtiketi().Match(html);
+        var form = FormTag().Match(html);
         if (!form.Success) return null;
 
-        var alanlar = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Match girdi in Girdi().Matches(form.Value))
-            alanlar[girdi.Groups["ad"].Value] = WebUtility.HtmlDecode(girdi.Groups["deger"].Value);
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Match input in InputTag().Matches(form.Value))
+            fields[input.Groups["ad"].Value] = WebUtility.HtmlDecode(input.Groups["deger"].Value);
 
-        return (WebUtility.HtmlDecode(form.Groups["action"].Value), alanlar);
+        return (WebUtility.HtmlDecode(form.Groups["action"].Value), fields);
     }
 
     [GeneratedRegex("""<form[^>]*action=["'](?<action>[^"']+)["'][^>]*>.*?</form>""",
         RegexOptions.Singleline | RegexOptions.IgnoreCase)]
-    private static partial Regex FormEtiketi();
+    private static partial Regex FormTag();
 
     [GeneratedRegex("""<input[^>]*name=["'](?<ad>[^"']+)["'][^>]*value=["'](?<deger>[^"']*)["']""",
         RegexOptions.IgnoreCase)]
-    private static partial Regex Girdi();
+    private static partial Regex InputTag();
 }

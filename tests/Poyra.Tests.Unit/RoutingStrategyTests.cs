@@ -131,7 +131,7 @@ public sealed class CardFactRuleTests
                 "route": ["Garanti POS"], "reason": "on-us: kart bankası = POS bankası" } ] }
             """);
 
-        RuleEvaluator.FirstMatch(doc, Facts(BonusKarti))!.Reason.ShouldContain("on-us");
+        RuleEvaluator.FirstMatch(doc, Facts(BonusKarti))!.Reason.ShouldNotBeNull().ShouldContain("on-us");
         RuleEvaluator.FirstMatch(doc, Facts(BonusKarti with { BankCode = "0064" })).ShouldBeNull();
     }
 

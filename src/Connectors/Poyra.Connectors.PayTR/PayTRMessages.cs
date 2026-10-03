@@ -43,13 +43,13 @@ public static class PayTRMessages
         => HmacBase64(string.Concat(merchantId, orderId, returnAmount, merchantSalt), merchantKey);
 
     /// <summary>Sabit zamanlı karşılaştırma — erken çıkan eşitlik imzayı bayt bayt aratır.</summary>
-    public static bool ImzaGecerli(string? gelen, string beklenen)
-        => !string.IsNullOrEmpty(gelen)
-           && gelen.Length == beklenen.Length
+    public static bool IsSignatureValid(string? received, string expected)
+        => !string.IsNullOrEmpty(received)
+           && received.Length == expected.Length
            && CryptographicOperations.FixedTimeEquals(
-               Encoding.UTF8.GetBytes(gelen), Encoding.UTF8.GetBytes(beklenen));
+               Encoding.UTF8.GetBytes(received), Encoding.UTF8.GetBytes(expected));
 
-    public static bool Onaylandi(string? status) => status == "success";
+    public static bool IsApproved(string? status) => status == "success";
 
     public static string UnifiedError(string? failedReasonCode) => failedReasonCode switch
     {
@@ -66,7 +66,7 @@ public static class PayTRMessages
         _ => UnifiedErrors.CardDeclined,
     };
 
-    private static string HmacBase64(string metin, string anahtar)
+    private static string HmacBase64(string text, string key)
         => Convert.ToBase64String(HMACSHA256.HashData(
-            Encoding.UTF8.GetBytes(anahtar), Encoding.UTF8.GetBytes(metin)));
+            Encoding.UTF8.GetBytes(key), Encoding.UTF8.GetBytes(text)));
 }

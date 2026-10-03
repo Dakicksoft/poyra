@@ -56,6 +56,8 @@ public sealed class ConnectorsModule
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddHttpClient(Poyra.Connectors.InterVpos.InterVposConnector.HttpClientName)
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient(Poyra.Connectors.Lidio.LidioConnector.HttpClientName)
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddKeyedSingleton<IPaymentConnector, MockBankConnector>(MockBankConnector.ConnectorKey);
         services.AddKeyedSingleton<IPaymentConnector, NestPayConnector>(NestPayConnector.ConnectorKey);
         services.AddKeyedSingleton<IPaymentConnector, GvpConnector>(GvpConnector.ConnectorKey);
@@ -92,6 +94,8 @@ public sealed class ConnectorsModule
             Poyra.Connectors.PayTR.PayTRConnector.ConnectorKey);
         services.AddKeyedSingleton<IPaymentConnector, Poyra.Connectors.Craftgate.CraftgateConnector>(
             Poyra.Connectors.Craftgate.CraftgateConnector.ConnectorKey);
+        services.AddKeyedSingleton<IPaymentConnector, Poyra.Connectors.Lidio.LidioConnector>(
+            Poyra.Connectors.Lidio.LidioConnector.ConnectorKey);
         services.AddSingleton(sp => new ConnectorRegistry(sp,
             [MockBankConnector.ConnectorKey, NestPayConnector.ConnectorKey,
              GvpConnector.ConnectorKey, PayFlexConnector.ConnectorKey,
@@ -110,7 +114,8 @@ public sealed class ConnectorsModule
              Poyra.Connectors.AhlPay.AhlPayConnector.ConnectorKey,
              Poyra.Connectors.ParamPos.ParamPosConnector.ConnectorKey,
              Poyra.Connectors.PayTR.PayTRConnector.ConnectorKey,
-             Poyra.Connectors.Craftgate.CraftgateConnector.ConnectorKey]));
+             Poyra.Connectors.Craftgate.CraftgateConnector.ConnectorKey,
+             Poyra.Connectors.Lidio.LidioConnector.ConnectorKey]));
         services.AddScoped<ConnectorCanaryJob>();
 
         services.AddScoped<IConnectorGateway, ConnectorGateway>();

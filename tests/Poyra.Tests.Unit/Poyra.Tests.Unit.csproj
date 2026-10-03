@@ -30,6 +30,7 @@
     <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.ParamPos\Poyra.Connectors.ParamPos.csproj" />
     <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.PayTR\Poyra.Connectors.PayTR.csproj" />
     <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Craftgate\Poyra.Connectors.Craftgate.csproj" />
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Lidio\Poyra.Connectors.Lidio.csproj" />
     <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Disputes\Poyra.Modules.Disputes.csproj" />
     <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Risk\Poyra.Modules.Risk.csproj" />
     <ProjectReference Include="..\..\src\Modules\Poyra.Modules.Field\Poyra.Modules.Field.csproj" />
@@ -40,7 +41,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
-    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Shouldly" />
     <PackageReference Include="Microsoft.Extensions.Configuration" />
   </ItemGroup>

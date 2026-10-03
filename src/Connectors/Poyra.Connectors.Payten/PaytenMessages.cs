@@ -19,26 +19,26 @@ public static class PaytenMessages
     /// yani sırrı bilmeyen biri hiçbirini üretemez; gevşeme güvenlikte değil yalnız
     /// biçimdedir. Sertifikasyonda tek biçime sabitlenmeli.
     /// </summary>
-    public static bool ImzaGecerli(
-        string? gelenImza, string merchantPaymentId, string? customerId, string? sessionToken,
+    public static bool IsSignatureValid(
+        string? receivedSignature, string merchantPaymentId, string? customerId, string? sessionToken,
         string? responseCode, string? randomKey, string secretKey)
     {
-        if (string.IsNullOrWhiteSpace(gelenImza)) return false;
+        if (string.IsNullOrWhiteSpace(receivedSignature)) return false;
 
-        var ozet = SHA512.HashData(Encoding.UTF8.GetBytes(string.Join('|',
+        var digest = SHA512.HashData(Encoding.UTF8.GetBytes(string.Join('|',
             merchantPaymentId, customerId ?? string.Empty, sessionToken ?? string.Empty,
             responseCode ?? string.Empty, randomKey ?? string.Empty, secretKey)));
 
-        return SabitZamanliEsit(gelenImza, Convert.ToHexString(ozet))
-               || SabitZamanliEsit(gelenImza, Convert.ToHexStringLower(ozet))
-               || SabitZamanliEsit(gelenImza, Convert.ToBase64String(ozet));
+        return ConstantTimeEquals(receivedSignature, Convert.ToHexString(digest))
+               || ConstantTimeEquals(receivedSignature, Convert.ToHexStringLower(digest))
+               || ConstantTimeEquals(receivedSignature, Convert.ToBase64String(digest));
     }
 
     /// <summary>
     /// Karşılaştırma sabit zamanlıdır: erken çıkan bir eşitlik kontrolü, saldırganın
     /// imzayı bayt bayt aramasına kapı açar.
     /// </summary>
-    private static bool SabitZamanliEsit(string a, string b)
+    private static bool ConstantTimeEquals(string a, string b)
         => a.Length == b.Length
            && CryptographicOperations.FixedTimeEquals(
                Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));

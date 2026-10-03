@@ -16,9 +16,9 @@ public static class MokaMessages
     /// bölünmeleri aynı metni üretebilir (bayi "12"+kullanıcı "34" ile bayi "1"+
     /// kullanıcı "234" ayırt edilemezdi).
     /// </summary>
-    public static string CheckKey(string bayiKodu, string kullanici, string parola)
+    public static string CheckKey(string dealerCode, string user, string password)
         => Convert.ToHexStringLower(SHA256.HashData(
-            Encoding.UTF8.GetBytes($"{bayiKodu}MK{kullanici}PD{parola}")));
+            Encoding.UTF8.GetBytes($"{dealerCode}MK{user}PD{password}")));
 
     /// <summary>Tutar noktalı ondalıkla gider — TR kültürü virgül üretir ve istek reddedilir.</summary>
     public static string Amount(long amountMinor)
@@ -28,7 +28,7 @@ public static class MokaMessages
     public static string Currency(string currency) => currency.ToUpperInvariant() switch
     {
         "TRY" or "TL" => "TL",
-        var digeri => digeri,
+        var other => other,
     };
 
     /// <summary>
@@ -40,11 +40,11 @@ public static class MokaMessages
         "PaymentDealer.CheckPaymentDealerAuthentication.InvalidRequest"
             or "PaymentDealer.CheckPaymentDealerAuthentication.InvalidAccount"
             => UnifiedErrors.ProcessingError,
-        var kod when kod?.Contains("Limit", StringComparison.OrdinalIgnoreCase) == true
+        var code when code?.Contains("Limit", StringComparison.OrdinalIgnoreCase) == true
             => UnifiedErrors.LimitExceeded,
-        var kod when kod?.Contains("Expire", StringComparison.OrdinalIgnoreCase) == true
+        var code when code?.Contains("Expire", StringComparison.OrdinalIgnoreCase) == true
             => UnifiedErrors.ExpiredCard,
-        var kod when kod?.Contains("Insufficient", StringComparison.OrdinalIgnoreCase) == true
+        var code when code?.Contains("Insufficient", StringComparison.OrdinalIgnoreCase) == true
             => UnifiedErrors.InsufficientFunds,
         null or "" => UnifiedErrors.ProcessingError,
         _ => UnifiedErrors.CardDeclined,

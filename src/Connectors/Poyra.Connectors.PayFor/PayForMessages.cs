@@ -16,10 +16,10 @@ public static class PayForMessages
             "TRY" or "TL" => "949",
             "USD" => "840",
             "EUR" => "978",
-            var digeri => digeri,
+            var other => other,
         };
 
-    public static string Rastgele() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(10));
+    public static string RandomNonce() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(10));
 
     /// <summary>
     /// İstek hash'i:
@@ -46,11 +46,11 @@ public static class PayForMessages
             procReturnCode ?? string.Empty, threeDStatus ?? string.Empty,
             responseRnd ?? string.Empty, userCode));
 
-    public static bool ImzaGecerli(string? gelen, string beklenen)
-        => !string.IsNullOrEmpty(gelen)
-           && gelen.Length == beklenen.Length
+    public static bool IsSignatureValid(string? received, string expected)
+        => !string.IsNullOrEmpty(received)
+           && received.Length == expected.Length
            && CryptographicOperations.FixedTimeEquals(
-               Encoding.ASCII.GetBytes(gelen), Encoding.ASCII.GetBytes(beklenen));
+               Encoding.ASCII.GetBytes(received), Encoding.ASCII.GetBytes(expected));
 
     public static string UnifiedError(string? procReturnCode, string? threeDStatus)
         => (procReturnCode, threeDStatus) switch
@@ -72,20 +72,20 @@ public static class PayForMessages
     /// API yanıtı <c>Ad=Deger;Ad=Deger</c> biçiminde düz metindir (JSON/XML değil).
     /// Boş/bozuk yanıt boş sözlük döner — çağıran "başarısız" sayar (fail closed).
     /// </summary>
-    public static IReadOnlyDictionary<string, string> Oku(string govde)
+    public static IReadOnlyDictionary<string, string> Parse(string body)
     {
-        var sonuc = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(govde)) return sonuc;
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(body)) return result;
 
-        foreach (var parca in govde.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var part in body.Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
-            var esittir = parca.IndexOf('=');
-            if (esittir <= 0) continue;
+            var equalsIndex = part.IndexOf('=');
+            if (equalsIndex <= 0) continue;
 
-            sonuc.TryAdd(parca[..esittir].Trim(), parca[(esittir + 1)..].Trim());
+            result.TryAdd(part[..equalsIndex].Trim(), part[(equalsIndex + 1)..].Trim());
         }
 
-        return sonuc;
+        return result;
     }
 
     private static string Sha1Base64(string value)

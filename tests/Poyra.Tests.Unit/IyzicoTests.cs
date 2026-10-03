@@ -34,25 +34,25 @@ public sealed class IyzicoImzaTests
         var beklenen = "IYZWSv2 " + Convert.ToBase64String(Encoding.UTF8.GetBytes(
             $"apiKey:{ApiKey}&randomKey:{rastgele}&signature:{beklenenImza}"));
 
-        IyzicoMessages.YetkiBasligi(ApiKey, SecretKey, yol, govde, rastgele).ShouldBe(beklenen);
+        IyzicoMessages.AuthorizationHeader(ApiKey, SecretKey, yol, govde, rastgele).ShouldBe(beklenen);
     }
 
     [Fact]
     public void Imza_govdeye_VE_yola_duyarli_olmali()
     {
         // Yol imzaya girmeseydi, bir uç için üretilmiş imza başka uca taşınabilirdi.
-        var temel = IyzicoMessages.YetkiBasligi(ApiKey, SecretKey, "/a", "{}", "r1");
+        var temel = IyzicoMessages.AuthorizationHeader(ApiKey, SecretKey, "/a", "{}", "r1");
 
-        IyzicoMessages.YetkiBasligi(ApiKey, SecretKey, "/b", "{}", "r1").ShouldNotBe(temel);
-        IyzicoMessages.YetkiBasligi(ApiKey, SecretKey, "/a", """{"x":1}""", "r1").ShouldNotBe(temel);
-        IyzicoMessages.YetkiBasligi(ApiKey, SecretKey, "/a", "{}", "r2").ShouldNotBe(temel);
-        IyzicoMessages.YetkiBasligi(ApiKey, "baska-sir", "/a", "{}", "r1").ShouldNotBe(temel);
+        IyzicoMessages.AuthorizationHeader(ApiKey, SecretKey, "/b", "{}", "r1").ShouldNotBe(temel);
+        IyzicoMessages.AuthorizationHeader(ApiKey, SecretKey, "/a", """{"x":1}""", "r1").ShouldNotBe(temel);
+        IyzicoMessages.AuthorizationHeader(ApiKey, SecretKey, "/a", "{}", "r2").ShouldNotBe(temel);
+        IyzicoMessages.AuthorizationHeader(ApiKey, "baska-sir", "/a", "{}", "r1").ShouldNotBe(temel);
     }
 
     [Fact]
     public void Rastgele_anahtar_her_cagrida_degismeli()
     {
-        var uretilenler = Enumerable.Range(0, 50).Select(_ => IyzicoMessages.RastgeleAnahtar()).ToList();
+        var uretilenler = Enumerable.Range(0, 50).Select(_ => IyzicoMessages.RandomKey()).ToList();
 
         uretilenler.ShouldBeUnique();
         uretilenler.ShouldAllBe(a => a.Length == 24); // 12 bayt → 24 onaltılık karakter
@@ -77,7 +77,7 @@ public sealed class IyzicoImzaTests
             """;
         var kodlu = Convert.ToBase64String(Encoding.UTF8.GetBytes(html));
 
-        var form = IyzicoMessages.FormuCoz(kodlu);
+        var form = IyzicoMessages.DecodeForm(kodlu);
 
         form.ShouldNotBeNull();
         form!.Value.ActionUrl.ShouldBe("https://3ds.iyzico.test/go");
@@ -89,7 +89,7 @@ public sealed class IyzicoImzaTests
     [InlineData("")]
     [InlineData("base64-degil!!")]
     public void Bozuk_icerik_null_donmeli(string? kodlu)
-        => IyzicoMessages.FormuCoz(kodlu).ShouldBeNull();
+        => IyzicoMessages.DecodeForm(kodlu).ShouldBeNull();
 }
 
 public sealed class IyzicoDonusTests

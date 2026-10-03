@@ -53,35 +53,35 @@ public sealed class CCPaymentConnector(IHttpClientFactory httpClientFactory) : I
     {
         var merchantKey = credentials.Require("merchant_key");
         var appSecret = credentials.Require("app_secret");
-        var tutar = CCPaymentMessages.Amount(request.AmountMinor);
-        var taksit = Math.Max(1, request.Installments);
+        var amount = CCPaymentMessages.Amount(request.AmountMinor);
+        var installment = Math.Max(1, request.Installments);
 
         // İmzaya giren alanlar tutarı ve taksiti KAPSAR: kapsamasaydı müşteri 1 ₺'lik
         // işlemi 1000 ₺ gibi gönderebilir ya da taksiti değiştirebilirdi.
-        var imza = CCPaymentMessages.Imzala(
-            string.Join('|', tutar, taksit, ParaBirimi(request.Currency), merchantKey, request.OrderId),
+        var signature = CCPaymentMessages.Sign(
+            string.Join('|', amount, installment, CurrencyCode(request.Currency), merchantKey, request.OrderId),
             appSecret);
 
-        var govde = new Dictionary<string, object?>
+        var body = new Dictionary<string, object?>
         {
             ["cc_holder_name"] = request.Card.HolderName ?? "POYRA",
             ["cc_no"] = request.Card.Pan,
             ["expiry_month"] = request.Card.ExpiryMonth.ToString("D2"),
             ["expiry_year"] = request.Card.ExpiryYear.ToString("D4"),
             ["cvv"] = request.Card.Cvv,
-            ["currency_code"] = ParaBirimi(request.Currency),
-            ["installments_number"] = taksit,
+            ["currency_code"] = CurrencyCode(request.Currency),
+            ["installments_number"] = installment,
             ["invoice_id"] = request.OrderId,
             ["invoice_description"] = request.Description ?? request.OrderId,
-            ["total"] = tutar,
+            ["total"] = amount,
             ["merchant_key"] = merchantKey,
             ["items"] = new[]
             {
-                new { name = request.Description ?? "Sipariş", price = tutar, quantity = 1, description = "" },
+                new { name = request.Description ?? "Sipariş", price = amount, quantity = 1, description = "" },
             },
             ["name"] = "Poyra",
             ["surname"] = "Musteri",
-            ["hash_key"] = imza,
+            ["hash_key"] = signature,
             ["ip"] = request.CustomerIp ?? "0.0.0.0",
             ["transaction_type"] = "Auth",
             ["response_method"] = "POST",
@@ -91,14 +91,14 @@ public sealed class CCPaymentConnector(IHttpClientFactory httpClientFactory) : I
             ["cancel_url"] = callbackUrl,
         };
 
-        var yanit = await GonderAsync(credentials, "api/paySmart3D", govde, ct);
-        var form = CCPaymentMessages.FormuCikar(yanit);
+        var response = await SendAsync(credentials, "api/paySmart3D", body, ct);
+        var form = CCPaymentMessages.ExtractForm(response);
 
-        if (form is not { } cikan)
+        if (form is not { } extracted)
             throw new ConnectorUnavailableException(
                 "CCPayment 3D adımı için beklenen yönlendirme formu dönmedi.");
 
-        return new HostedPaymentForm(cikan.ActionUrl, cikan.Fields);
+        return new HostedPaymentForm(extracted.ActionUrl, extracted.Fields);
     }
 
     /// <summary>
@@ -112,7 +112,7 @@ public sealed class CCPaymentConnector(IHttpClientFactory httpClientFactory) : I
         var orderId = form.GetValueOrDefault("invoice_id", string.Empty);
         var mdStatus = form.GetValueOrDefault("md_status");
 
-        if (!ImzaGecerli(form, credentials, orderId))
+        if (!IsSignatureValid(form, credentials, orderId))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
                 UnifiedErrors.SignatureInvalid, mdStatus, "CCPayment imzası doğrulanamadı.");
@@ -133,7 +133,7 @@ public sealed class CCPaymentConnector(IHttpClientFactory httpClientFactory) : I
         var mdStatus = form.GetValueOrDefault("md_status");
         var providerOrderId = form.GetValueOrDefault("order_id", string.Empty);
 
-        if (!ImzaGecerli(form, credentials, orderId))
+        if (!IsSignatureValid(form, credentials, orderId))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
                 UnifiedErrors.SignatureInvalid, mdStatus, "CCPayment imzası doğrulanamadı.");
@@ -147,145 +147,145 @@ public sealed class CCPaymentConnector(IHttpClientFactory httpClientFactory) : I
         var merchantKey = credentials.Require("merchant_key");
         var appSecret = credentials.Require("app_secret");
 
-        var govde = new Dictionary<string, object?>
+        var body = new Dictionary<string, object?>
         {
             ["merchant_key"] = merchantKey,
             ["invoice_id"] = orderId,
             ["order_id"] = providerOrderId,
             ["status"] = "complete",
             ["app_lang"] = "tr",
-            ["hash_key"] = CCPaymentMessages.Imzala(
+            ["hash_key"] = CCPaymentMessages.Sign(
                 string.Join('|', merchantKey, orderId, providerOrderId, "complete"), appSecret),
         };
 
-        var yanit = await GonderAsync(credentials, "payment/complete", govde, ct);
-        using var belge = JsonDocument.Parse(yanit);
-        var kok = belge.RootElement;
-        var durum = Metin(kok, "status_code");
+        var response = await SendAsync(credentials, "payment/complete", body, ct);
+        using var document = JsonDocument.Parse(response);
+        var root = document.RootElement;
+        var status = Text(root, "status_code");
 
-        if (durum != "100")
+        if (status != "100")
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                CCPaymentMessages.UnifiedError(durum, mdStatus), durum, Metin(kok, "status_description"));
+                CCPaymentMessages.UnifiedError(status, mdStatus), status, Text(root, "status_description"));
 
-        var veri = kok.TryGetProperty("data", out var d) ? d : default;
+        var data = root.TryGetProperty("data", out var d) ? d : default;
         return new HostedCallbackResult(
             true, orderId,
-            AuthCode: Metin(veri, "auth_code"),
+            AuthCode: Text(data, "auth_code"),
             ConnectorTxnId: providerOrderId,
-            MaskedPan: Metin(veri, "cc_no"),
-            CardBank: Metin(veri, "card_bank"),
-            UnifiedErrors.None, durum, null);
+            MaskedPan: Text(data, "cc_no"),
+            CardBank: Text(data, "card_bank"),
+            UnifiedErrors.None, status, null);
     }
 
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IadeEtAsync(reference.OrderId, "0", credentials, ct);
+        => RefundCoreAsync(reference.OrderId, "0", credentials, ct);
 
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IadeEtAsync(request.OrderId, CCPaymentMessages.Amount(request.AmountMinor), credentials, ct);
+        => RefundCoreAsync(request.OrderId, CCPaymentMessages.Amount(request.AmountMinor), credentials, ct);
 
 
-    private async Task<ConnectorOperationResult> IadeEtAsync(
-        string orderId, string tutar, ConnectorCredentials credentials, CancellationToken ct)
+    private async Task<ConnectorOperationResult> RefundCoreAsync(
+        string orderId, string amount, ConnectorCredentials credentials, CancellationToken ct)
     {
         var merchantKey = credentials.Require("merchant_key");
 
-        var govde = new Dictionary<string, object?>
+        var body = new Dictionary<string, object?>
         {
             ["invoice_id"] = orderId,
-            ["amount"] = tutar,
+            ["amount"] = amount,
             ["app_id"] = credentials.Require("app_id"),
             ["app_secret"] = credentials.Require("app_secret"),
             ["merchant_key"] = merchantKey,
-            ["hash_key"] = CCPaymentMessages.Imzala(
-                string.Join('|', tutar, orderId, merchantKey), credentials.Require("app_secret")),
+            ["hash_key"] = CCPaymentMessages.Sign(
+                string.Join('|', amount, orderId, merchantKey), credentials.Require("app_secret")),
         };
 
-        var yanit = await GonderAsync(credentials, "api/refund", govde, ct);
-        using var belge = JsonDocument.Parse(yanit);
-        var durum = Metin(belge.RootElement, "status_code");
+        var response = await SendAsync(credentials, "api/refund", body, ct);
+        using var document = JsonDocument.Parse(response);
+        var status = Text(document.RootElement, "status_code");
 
-        return durum == "100"
+        return status == "100"
             ? ConnectorOperationResult.Ok(orderId)
             : ConnectorOperationResult.Fail(
-                CCPaymentMessages.UnifiedError(durum, null), durum,
-                Metin(belge.RootElement, "status_description"));
+                CCPaymentMessages.UnifiedError(status, null), status,
+                Text(document.RootElement, "status_description"));
     }
 
-    private async Task<string> BelirtecAlAsync(ConnectorCredentials credentials, CancellationToken ct)
+    private async Task<string> GetTokenAsync(ConnectorCredentials credentials, CancellationToken ct)
     {
-        var yanit = await GonderAsync(credentials, "api/token", new Dictionary<string, object?>
+        var response = await SendAsync(credentials, "api/token", new Dictionary<string, object?>
         {
             ["app_id"] = credentials.Require("app_id"),
             ["app_secret"] = credentials.Require("app_secret"),
-        }, ct, belirtec: null);
+        }, ct, token: null);
 
-        using var belge = JsonDocument.Parse(yanit);
-        if (Metin(belge.RootElement, "status_code") != "100")
+        using var document = JsonDocument.Parse(response);
+        if (Text(document.RootElement, "status_code") != "100")
             throw new ConnectorUnavailableException("CCPayment belirteci alınamadı.");
 
-        var veri = belge.RootElement.TryGetProperty("data", out var d) ? d : default;
-        return Metin(veri, "token")
+        var data = document.RootElement.TryGetProperty("data", out var d) ? d : default;
+        return Text(data, "token")
                ?? throw new ConnectorUnavailableException("CCPayment belirteç yanıtında token yok.");
     }
 
-    private async Task<string> GonderAsync(
-        ConnectorCredentials credentials, string yol, Dictionary<string, object?> govde,
-        CancellationToken ct, string? belirtec = "")
+    private async Task<string> SendAsync(
+        ConnectorCredentials credentials, string path, Dictionary<string, object?> body,
+        CancellationToken ct, string? token = "")
     {
-        var istemci = httpClientFactory.CreateClient(HttpClientName);
-        var adres = $"{credentials.Require("gateway_base").TrimEnd('/')}/{yol}";
+        var client = httpClientFactory.CreateClient(HttpClientName);
+        var url = $"{credentials.Require("gateway_base").TrimEnd('/')}/{path}";
 
-        using var istek = new HttpRequestMessage(HttpMethod.Post, adres)
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
         {
-            Content = JsonContent.Create(govde),
+            Content = JsonContent.Create(body),
         };
 
         // belirteç == "" → "gerekiyorsa al"; null → belirteç ucunun kendisi (sonsuz döngü olmasın)
-        if (belirtec is not null)
-            istek.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
-                "Bearer", belirtec.Length == 0 ? await BelirtecAlAsync(credentials, ct) : belirtec);
+        if (token is not null)
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                "Bearer", token.Length == 0 ? await GetTokenAsync(credentials, ct) : token);
 
         try
         {
-            using var yanit = await istemci.SendAsync(istek, ct);
-            var govdeMetni = await yanit.Content.ReadAsStringAsync(ct);
+            using var response = await client.SendAsync(request, ct);
+            var bodyText = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"CCPayment {yol} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"CCPayment {path} → {(int)response.StatusCode}.");
 
-            return govdeMetni;
+            return bodyText;
         }
         catch (HttpRequestException ex)
         {
             // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"CCPayment {yol} ucuna ulaşılamadı.", ex);
+            throw new ConnectorUnavailableException($"CCPayment {path} ucuna ulaşılamadı.", ex);
         }
     }
 
-    private static bool ImzaGecerli(
+    private static bool IsSignatureValid(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials, string orderId)
     {
-        var cozulmus = CCPaymentMessages.Coz(
+        var decrypted = CCPaymentMessages.Decrypt(
             form.GetValueOrDefault("hash_key"), credentials.Require("app_secret"));
 
         // İmza çözülüyorsa anahtar bizimkiyle aynı demektir; ilk alanın sipariş numaramızı
         // tutması da başka bir işlemin imzasının buraya taşınmadığını gösterir.
-        return cozulmus is not null
-               && cozulmus.Split('|') is [var ilk, ..]
-               && string.Equals(ilk, orderId, StringComparison.Ordinal);
+        return decrypted is not null
+               && decrypted.Split('|') is [var first, ..]
+               && string.Equals(first, orderId, StringComparison.Ordinal);
     }
 
-    private static string ParaBirimi(string currency) => currency.ToUpperInvariant();
+    private static string CurrencyCode(string currency) => currency.ToUpperInvariant();
 
-    private static string? Metin(JsonElement element, string ad)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(ad, out var deger)
-            ? deger.ValueKind switch
+    private static string? Text(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
             {
-                JsonValueKind.String => deger.GetString(),
-                JsonValueKind.Number => deger.ToString(),
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
                 _ => null,
             }
             : null;

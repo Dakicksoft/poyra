@@ -14,15 +14,15 @@ public sealed class VakifKatilimConnector(IHttpClientFactory httpClientFactory)
 
     public override string Key => ConnectorKey;
 
-    protected override string XmlKokEleman => "VPosMessageContract";
-    protected override string XmlEkVeriEleman => "VPosAdditionalData";
-    protected override string GatewayOnEk => "VirtualPOS.Gateway";
+    protected override string XmlRootElement => "VPosMessageContract";
+    protected override string XmlExtraDataElement => "VPosAdditionalData";
+    protected override string GatewayPrefix => "VirtualPOS.Gateway";
 
     public override ConnectorDescriptor Descriptor { get; } = new(
         ConnectorKey,
         "Vakıf Katılım Sanal POS (3D) — SERTİFİKASYON BEKLİYOR",
         ConnectorType.BankVirtualPos,
-        OrtakKimlikAlanlari,
+        CommonCredentialFields,
         SupportsInstallments: true,
         SupportsVoid: true,
         SupportsRefund: true,

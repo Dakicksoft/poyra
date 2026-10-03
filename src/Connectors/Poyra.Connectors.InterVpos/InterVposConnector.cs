@@ -140,12 +140,12 @@ public sealed class InterVposConnector(IHttpClientFactory httpClientFactory) : I
     /// </summary>
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "Void", reference.OrderId, tutar: null, reference.ConnectorTxnId, ct);
+        => OperationAsync(credentials, "Void", reference.OrderId, amount: null, reference.ConnectorTxnId, ct);
 
     /// <summary>İade: gün sonu sonrası (kısmi) geri ödeme (<c>TxnType=Refund</c>).</summary>
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "Refund", request.OrderId,
+        => OperationAsync(credentials, "Refund", request.OrderId,
             InterVposMessages.Amount(request.AmountMinor), request.ConnectorTxnId, ct);
 
     /// <summary>
@@ -156,11 +156,11 @@ public sealed class InterVposConnector(IHttpClientFactory httpClientFactory) : I
     /// bu uçta farklı bir alan döndürüyorsa iade BAŞARISIZ görünür (fail closed) —
     /// yanlış tarafa düşüp "iade edildi" demesindense böylesi yeğdir.
     /// </summary>
-    private async Task<ConnectorOperationResult> IslemAsync(
-        ConnectorCredentials credentials, string txnType, string orderId, string? tutar,
+    private async Task<ConnectorOperationResult> OperationAsync(
+        ConnectorCredentials credentials, string txnType, string orderId, string? amount,
         string? txnId, CancellationToken ct)
     {
-        var alanlar = new Dictionary<string, string>(StringComparer.Ordinal)
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["ShopCode"] = credentials.Require("shop_code"),
             ["UserCode"] = credentials.Require("user_code"),
@@ -172,28 +172,28 @@ public sealed class InterVposConnector(IHttpClientFactory httpClientFactory) : I
             ["Lang"] = "tr",
         };
 
-        if (tutar is not null)
-            alanlar["PurchAmount"] = tutar;
+        if (amount is not null)
+            fields["PurchAmount"] = amount;
 
-        var adres = credentials.Require("gateway_base").TrimEnd('/');
+        var url = credentials.Require("gateway_base").TrimEnd('/');
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.PostAsync(adres, new FormUrlEncodedContent(alanlar), ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.PostAsync(url, new FormUrlEncodedContent(fields), ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"InterVPOS {txnType} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"InterVPOS {txnType} → {(int)response.StatusCode}.");
 
-            var okunan = InterVposMessages.Oku(metin);
-            var kod = okunan.GetValueOrDefault("ProcReturnCode");
+            var parsed = InterVposMessages.Parse(text);
+            var code = parsed.GetValueOrDefault("ProcReturnCode");
 
-            return kod == "00"
-                ? ConnectorOperationResult.Ok(okunan.GetValueOrDefault("TransId") ?? txnId)
+            return code == "00"
+                ? ConnectorOperationResult.Ok(parsed.GetValueOrDefault("TransId") ?? txnId)
                 : ConnectorOperationResult.Fail(
-                    InterVposMessages.UnifiedError(kod), kod,
-                    okunan.GetValueOrDefault("ErrorMessage") ?? okunan.GetValueOrDefault("ErrMsg"));
+                    InterVposMessages.UnifiedError(code), code,
+                    parsed.GetValueOrDefault("ErrorMessage") ?? parsed.GetValueOrDefault("ErrMsg"));
         }
         catch (HttpRequestException ex)
         {
