@@ -43,9 +43,9 @@ public sealed class PayForConnector(IHttpClientFactory httpClientFactory) : IPay
         HostedPaymentRequest request, ConnectorCredentials credentials, CancellationToken ct)
     {
         var mbrId = credentials.Require("mbr_id");
-        var tutar = PayForMessages.Amount(request.AmountMinor);
-        var taksit = request.Installments > 1 ? request.Installments.ToString() : string.Empty;
-        var rastgele = PayForMessages.Rastgele();
+        var amount = PayForMessages.Amount(request.AmountMinor);
+        var installment = request.Installments > 1 ? request.Installments.ToString() : string.Empty;
+        var random = PayForMessages.RandomNonce();
 
         var fields = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -62,22 +62,22 @@ public sealed class PayForConnector(IHttpClientFactory httpClientFactory) : IPay
             ["OrderId"] = request.OrderId,
             ["SecureType"] = "3DPay", // kart bankanın sayfasında
             ["TxnType"] = "Auth",
-            ["PurchAmount"] = tutar,
+            ["PurchAmount"] = amount,
             ["Currency"] = PayForMessages.Currency(request.Currency),
             // Tek çekimde BOŞ gider, "1" değil: "1" bazı bankalarda taksit kampanyası
             // sayılır ve işlem farklı komisyonla geçer.
-            ["InstallmentCount"] = taksit,
+            ["InstallmentCount"] = installment,
             ["OkUrl"] = request.CallbackUrl,
             ["FailUrl"] = request.CallbackUrl,
-            ["Rnd"] = rastgele,
+            ["Rnd"] = random,
             ["Lang"] = "TR",
             ["Hash"] = PayForMessages.RequestHash(
-                mbrId, request.OrderId, tutar, request.CallbackUrl, request.CallbackUrl,
-                "Auth", taksit, rastgele, credentials.Require("merchant_pass")),
+                mbrId, request.OrderId, amount, request.CallbackUrl, request.CallbackUrl,
+                "Auth", installment, random, credentials.Require("merchant_pass")),
         };
 
-        var adres = $"{credentials.Require("gateway_base").TrimEnd('/')}/Gateway/Default.aspx";
-        return Task.FromResult(new HostedPaymentForm(adres, fields));
+        var url = $"{credentials.Require("gateway_base").TrimEnd('/')}/Gateway/Default.aspx";
+        return Task.FromResult(new HostedPaymentForm(url, fields));
     }
 
     /// <summary>
@@ -95,12 +95,12 @@ public sealed class PayForConnector(IHttpClientFactory httpClientFactory) : IPay
         var procReturnCode = form.GetValueOrDefault("ProcReturnCode");
         var threeDStatus = form.GetValueOrDefault("3DStatus");
 
-        var beklenen = PayForMessages.ResponseHash(
+        var expected = PayForMessages.ResponseHash(
             credentials.Require("merchant_id"), credentials.Require("merchant_pass"),
             orderId, form.GetValueOrDefault("AuthCode"), procReturnCode, threeDStatus,
             form.GetValueOrDefault("ResponseRnd"), credentials.Require("user_code"));
 
-        if (!PayForMessages.ImzaGecerli(form.GetValueOrDefault("ResponseHash"), beklenen))
+        if (!PayForMessages.IsSignatureValid(form.GetValueOrDefault("ResponseHash"), expected))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
                 UnifiedErrors.SignatureInvalid, procReturnCode,
@@ -130,7 +130,7 @@ public sealed class PayForConnector(IHttpClientFactory httpClientFactory) : IPay
     /// </summary>
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "Void", reference.OrderId, tutar: null, "TRY", ct);
+        => OperationAsync(credentials, "Void", reference.OrderId, amount: null, "TRY", ct);
 
     /// <summary>
     /// İade (Refund): satış günü GEÇTİKTEN sonra paranın geri gönderilmesi. Banka
@@ -138,14 +138,14 @@ public sealed class PayForConnector(IHttpClientFactory httpClientFactory) : IPay
     /// </summary>
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "Refund", request.OrderId,
+        => OperationAsync(credentials, "Refund", request.OrderId,
             PayForMessages.Amount(request.AmountMinor), request.Currency, ct);
 
-    private async Task<ConnectorOperationResult> IslemAsync(
-        ConnectorCredentials credentials, string txnType, string orderId, string? tutar,
+    private async Task<ConnectorOperationResult> OperationAsync(
+        ConnectorCredentials credentials, string txnType, string orderId, string? amount,
         string currency, CancellationToken ct)
     {
-        var alanlar = new Dictionary<string, string>(StringComparer.Ordinal)
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["MbrId"] = credentials.Require("mbr_id"),
             ["MerchantId"] = credentials.Require("merchant_id"),
@@ -161,28 +161,28 @@ public sealed class PayForConnector(IHttpClientFactory httpClientFactory) : IPay
 
         // Tutar YALNIZ iadede gönderilir ve tam iki ondalık olmalıdır — banka
         // "99,500" gibi üç ondalıklı değeri reddediyor.
-        if (tutar is not null)
-            alanlar["PurchAmount"] = tutar;
+        if (amount is not null)
+            fields["PurchAmount"] = amount;
 
-        var adres = $"{credentials.Require("gateway_base").TrimEnd('/')}/Gateway/Default.aspx";
+        var url = $"{credentials.Require("gateway_base").TrimEnd('/')}/Gateway/Default.aspx";
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.PostAsync(adres, new FormUrlEncodedContent(alanlar), ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.PostAsync(url, new FormUrlEncodedContent(fields), ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"PayFor {txnType} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"PayFor {txnType} → {(int)response.StatusCode}.");
 
-            var alanlarYanit = PayForMessages.Oku(metin);
-            var kod = alanlarYanit.GetValueOrDefault("ProcReturnCode");
+            var responseFields = PayForMessages.Parse(text);
+            var code = responseFields.GetValueOrDefault("ProcReturnCode");
 
-            return kod == "00"
-                ? ConnectorOperationResult.Ok(alanlarYanit.GetValueOrDefault("TransId"))
+            return code == "00"
+                ? ConnectorOperationResult.Ok(responseFields.GetValueOrDefault("TransId"))
                 : ConnectorOperationResult.Fail(
-                    PayForMessages.UnifiedError(kod, null), kod,
-                    alanlarYanit.GetValueOrDefault("ErrMsg"));
+                    PayForMessages.UnifiedError(code, null), code,
+                    responseFields.GetValueOrDefault("ErrMsg"));
         }
         catch (HttpRequestException ex)
         {

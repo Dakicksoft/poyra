@@ -18,7 +18,7 @@ public static class PayNKolayMessages
     public static string Amount(long amountMinor)
         => (amountMinor / 100m).ToString("0.00", CultureInfo.InvariantCulture);
 
-    public static string Rastgele() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(10));
+    public static string RandomNonce() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(10));
 
     /// <summary>
     /// İstek hash'i:
@@ -47,14 +47,14 @@ public static class PayNKolayMessages
             currencyCode ?? string.Empty, secretKey));
 
     /// <summary>Sabit zamanlı karşılaştırma — erken çıkan eşitlik imzayı bayt bayt aratır.</summary>
-    public static bool ImzaGecerli(string? gelen, string beklenen)
-        => !string.IsNullOrEmpty(gelen)
-           && gelen.Length == beklenen.Length
+    public static bool IsSignatureValid(string? received, string expected)
+        => !string.IsNullOrEmpty(received)
+           && received.Length == expected.Length
            && CryptographicOperations.FixedTimeEquals(
-               Encoding.UTF8.GetBytes(gelen), Encoding.UTF8.GetBytes(beklenen));
+               Encoding.UTF8.GetBytes(received), Encoding.UTF8.GetBytes(expected));
 
     /// <summary>Başarı kodu <c>2</c>'dir — "0" ya da "00" değil.</summary>
-    public static bool Onaylandi(string? responseCode) => responseCode == "2";
+    public static bool IsApproved(string? responseCode) => responseCode == "2";
 
     /// <summary>
     /// Sağlayıcı kodunu Poyra'nın birleşik sözlüğüne çevirir.

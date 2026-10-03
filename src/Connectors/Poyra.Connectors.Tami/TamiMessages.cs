@@ -17,15 +17,15 @@ public static class TamiMessages
     /// Anahtar JWK'daki <c>k</c> alanıdır ve base64url kodludur — düz metin sanıp
     /// olduğu gibi kullanmak imzayı sessizce yanlış üretir.
     /// </summary>
-    public static string SecurityHash(string govdeJson, string kid, string jwkKey)
+    public static string SecurityHash(string bodyJson, string kid, string jwkKey)
     {
-        var baslik = JsonSerializer.Serialize(new { alg = "HS512", kid, typ = "JWT" });
-        var imzaGirdisi = $"{Kodla(Encoding.UTF8.GetBytes(baslik))}.{Kodla(Encoding.UTF8.GetBytes(govdeJson))}";
+        var header = JsonSerializer.Serialize(new { alg = "HS512", kid, typ = "JWT" });
+        var signatureInput = $"{Encode(Encoding.UTF8.GetBytes(header))}.{Encode(Encoding.UTF8.GetBytes(bodyJson))}";
 
-        var imza = HMACSHA512.HashData(
-            Coz(jwkKey), Encoding.UTF8.GetBytes(imzaGirdisi));
+        var signature = HMACSHA512.HashData(
+            Decrypt(jwkKey), Encoding.UTF8.GetBytes(signatureInput));
 
-        return $"{imzaGirdisi}.{Kodla(imza)}";
+        return $"{signatureInput}.{Encode(signature)}";
     }
 
     public static string UnifiedError(string? paymentStatus, string? mdStatus)
@@ -39,7 +39,7 @@ public static class TamiMessages
             _ => UnifiedErrors.CardDeclined,
         };
 
-    private static string Kodla(byte[] bytes) => Base64Url.EncodeToString(bytes);
+    private static string Encode(byte[] bytes) => Base64Url.EncodeToString(bytes);
 
-    private static byte[] Coz(string metin) => Base64Url.DecodeFromChars(metin);
+    private static byte[] Decrypt(string text) => Base64Url.DecodeFromChars(text);
 }

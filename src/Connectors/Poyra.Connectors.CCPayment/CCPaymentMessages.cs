@@ -26,19 +26,19 @@ public static class CCPaymentMessages
     /// IV ve tuz her çağrıda rastgeledir; aynı girdiden aynı imza ÇIKMAZ. Bu yüzden
     /// imza "yeniden üretip eşitleyerek" değil, çözülerek doğrulanır.
     /// </summary>
-    public static string Imzala(string birlesikMetin, string appSecret)
+    public static string Sign(string joined, string appSecret)
     {
-        var iv = RastgeleOzet(16);
-        var tuz = RastgeleOzet(4);
+        var iv = RandomHex(16);
+        var salt = RandomHex(4);
 
         using var aes = Aes.Create();
-        aes.Key = AnahtarTuret(appSecret, tuz);
+        aes.Key = DeriveKey(appSecret, salt);
         aes.IV = Encoding.UTF8.GetBytes(iv);
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
 
-        var sifreli = aes.EncryptCbc(Encoding.UTF8.GetBytes(birlesikMetin), aes.IV, PaddingMode.PKCS7);
-        return $"{iv}:{tuz}:{Convert.ToBase64String(sifreli)}".Replace("/", "__");
+        var encrypted = aes.EncryptCbc(Encoding.UTF8.GetBytes(joined), aes.IV, PaddingMode.PKCS7);
+        return $"{iv}:{salt}:{Convert.ToBase64String(encrypted)}".Replace("/", "__");
     }
 
     /// <summary>
@@ -46,26 +46,26 @@ public static class CCPaymentMessages
     /// sayar. İstisna atmak, sahte bir dönüşü 500'e çevirip gerçek hatadan ayırt
     /// edilemez hâle getirirdi.
     /// </summary>
-    public static string? Coz(string? imza, string appSecret)
+    public static string? Decrypt(string? signature, string appSecret)
     {
-        if (string.IsNullOrWhiteSpace(imza)) return null;
+        if (string.IsNullOrWhiteSpace(signature)) return null;
 
-        var parcalar = imza.Replace("__", "/").Split(':');
-        if (parcalar.Length != 3) return null;
+        var parts = signature.Replace("__", "/").Split(':');
+        if (parts.Length != 3) return null;
 
-        var (iv, tuz, sifreli) = (parcalar[0], parcalar[1], parcalar[2]);
+        var (iv, salt, encrypted) = (parts[0], parts[1], parts[2]);
         if (iv.Length != 16) return null;
 
         try
         {
             using var aes = Aes.Create();
-            aes.Key = AnahtarTuret(appSecret, tuz);
+            aes.Key = DeriveKey(appSecret, salt);
             aes.Mode = CipherMode.CBC;
             aes.Padding = PaddingMode.PKCS7;
 
-            var duz = aes.DecryptCbc(
-                Convert.FromBase64String(sifreli), Encoding.UTF8.GetBytes(iv), PaddingMode.PKCS7);
-            return Encoding.UTF8.GetString(duz);
+            var plain = aes.DecryptCbc(
+                Convert.FromBase64String(encrypted), Encoding.UTF8.GetBytes(iv), PaddingMode.PKCS7);
+            return Encoding.UTF8.GetString(plain);
         }
         catch (Exception ex) when (ex is CryptographicException or FormatException)
         {
@@ -78,23 +78,23 @@ public static class CCPaymentMessages
     /// olarak (bayta çevrilmiş hâli değil). Bayt karşılığını kullanmak 32 yerine 16
     /// baytlık anahtar üretir ve platform imzayı reddeder.
     /// </summary>
-    private static byte[] AnahtarTuret(string appSecret, string tuz)
-        => Encoding.UTF8.GetBytes(OnaltilikOzet(SHA256.HashData(
-            Encoding.UTF8.GetBytes(OnaltilikOzet(SHA1.HashData(Encoding.UTF8.GetBytes(appSecret))) + tuz)))[..32]);
+    private static byte[] DeriveKey(string appSecret, string salt)
+        => Encoding.UTF8.GetBytes(HexDigest(SHA256.HashData(
+            Encoding.UTF8.GetBytes(HexDigest(SHA1.HashData(Encoding.UTF8.GetBytes(appSecret))) + salt)))[..32]);
 
-    private static string RastgeleOzet(int uzunluk)
-        => OnaltilikOzet(SHA1.HashData(
+    private static string RandomHex(int length)
+        => HexDigest(SHA1.HashData(
             Encoding.UTF8.GetBytes(RandomNumberGenerator.GetInt32(int.MaxValue).ToString(
-                CultureInfo.InvariantCulture))))[..uzunluk];
+                CultureInfo.InvariantCulture))))[..length];
 
-    private static string OnaltilikOzet(byte[] bytes) => Convert.ToHexStringLower(bytes);
+    private static string HexDigest(byte[] bytes) => Convert.ToHexStringLower(bytes);
 
     /// <summary>
     /// Platform 3D adımını hazır HTML olarak döndürür; Poyra'nın modeli ise
     /// "adres + alanlar" ister (tarayıcıya kendi formumuzu basarız). Form buradan çıkarılır.
     /// </summary>
-    public static (string ActionUrl, Dictionary<string, string> Fields)? FormuCikar(string html)
-        => ConnectorHtml.FormuCikar(html);
+    public static (string ActionUrl, Dictionary<string, string> Fields)? ExtractForm(string html)
+        => ConnectorHtml.ExtractForm(html);
 
     public static string UnifiedError(string? statusCode, string? mdStatus) => (statusCode, mdStatus) switch
     {

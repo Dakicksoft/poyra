@@ -53,17 +53,17 @@ public sealed class AhlPayConnector(IHttpClientFactory httpClientFactory) : IPay
         DirectPaymentRequest request, string callbackUrl, ConnectorCredentials credentials,
         CancellationToken ct)
     {
-        var rastgele = AhlPayMessages.Rastgele();
+        var random = AhlPayMessages.RandomNonce();
 
-        using var yanit = await GonderAsync(credentials, "api/Payment/Payment3d", new
+        using var response = await SendAsync(credentials, "api/Payment/Payment3d", new
         {
             cardNumber = request.Card.Pan,
             expiryDateMonth = request.Card.ExpiryMonth.ToString("D2"),
             expiryDateYear = request.Card.ExpiryYear.ToString("D4"),
             cvv = request.Card.Cvv,
             cardHolderName = request.Card.HolderName ?? "POYRA MUSTERI",
-            merchantId = Sayi(credentials.Require("merchant_id")),
-            memberId = Sayi(credentials.Require("member_id")),
+            merchantId = ParseInt(credentials.Require("merchant_id")),
+            memberId = ParseInt(credentials.Require("member_id")),
             userCode = credentials.Require("user_code"),
             totalAmount = AhlPayMessages.Amount(request.AmountMinor),
             txnType = "Auth",
@@ -71,8 +71,8 @@ public sealed class AhlPayConnector(IHttpClientFactory httpClientFactory) : IPay
             installmentCount = request.Installments > 1 ? request.Installments.ToString() : "0",
             currency = "949",
             orderId = request.OrderId,
-            rnd = rastgele,
-            hash = AhlPayMessages.RequestHash(rastgele),
+            rnd = random,
+            hash = AhlPayMessages.RequestHash(random),
             description = request.Description ?? request.OrderId,
             requestIp = request.CustomerIp ?? "0.0.0.0",
             webUrl = callbackUrl,
@@ -80,16 +80,16 @@ public sealed class AhlPayConnector(IHttpClientFactory httpClientFactory) : IPay
             failUrl = callbackUrl,
         }, ct);
 
-        var kok = yanit.RootElement;
-        if (!Bayrak(kok, "isSuccess"))
+        var root = response.RootElement;
+        if (!Flag(root, "isSuccess"))
             throw new ConnectorUnavailableException(
-                $"AHL Pay 3D başlatma reddetti: {Metin(kok, "errorCode")} {Metin(kok, "message")}");
+                $"AHL Pay 3D başlatma reddetti: {Text(root, "errorCode")} {Text(root, "message")}");
 
-        var form = ConnectorHtml.FormuCikar(Metin(kok, "data") ?? string.Empty);
-        if (form is not { } cikan)
+        var form = ConnectorHtml.ExtractForm(Text(root, "data") ?? string.Empty);
+        if (form is not { } extracted)
             throw new ConnectorUnavailableException("AHL Pay 3D yanıtında beklenen form yok.");
 
-        return new HostedPaymentForm(cikan.ActionUrl, cikan.Fields);
+        return new HostedPaymentForm(extracted.ActionUrl, extracted.Fields);
     }
 
     public HostedCallbackResult ParseAndValidateCallback(
@@ -102,29 +102,29 @@ public sealed class AhlPayConnector(IHttpClientFactory httpClientFactory) : IPay
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials, CancellationToken ct)
     {
         var orderId = form.GetValueOrDefault("orderId", string.Empty);
-        var rastgele = AhlPayMessages.Rastgele();
+        var random = AhlPayMessages.RandomNonce();
 
-        using var sorgu = await GonderAsync(credentials, "api/Payment/PaymentInquiry", new
+        using var query = await SendAsync(credentials, "api/Payment/PaymentInquiry", new
         {
-            merchantId = Sayi(credentials.Require("merchant_id")),
-            memberId = Sayi(credentials.Require("member_id")),
+            merchantId = ParseInt(credentials.Require("merchant_id")),
+            memberId = ParseInt(credentials.Require("member_id")),
             orderId,
-            rnd = rastgele,
-            hash = AhlPayMessages.RequestHash(rastgele),
+            rnd = random,
+            hash = AhlPayMessages.RequestHash(random),
         }, ct);
 
-        var kok = sorgu.RootElement;
-        var veri = kok.TryGetProperty("data", out var d) ? d : default;
-        var durum = Metin(veri, "txnStatus");
+        var root = query.RootElement;
+        var data = root.TryGetProperty("data", out var d) ? d : default;
+        var status = Text(data, "txnStatus");
 
         // İki koşul birden: sorgu başarılı VE işlem durumu tahsilat anlamına gelmeli.
         // Yalnız isSuccess'e bakmak, iptal edilmiş (VOID) bir işlemi başarılı saymaya
         // açık bırakırdı — sağlayıcının kendi örnek yanıtı tam olarak öyle.
-        if (!Bayrak(kok, "isSuccess") || !AhlPayMessages.TahsilEdildi(durum))
+        if (!Flag(root, "isSuccess") || !AhlPayMessages.IsCaptured(status))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
                 AhlPayMessages.UnifiedError(form.GetValueOrDefault("responseCode")),
-                durum ?? Metin(kok, "errorCode"), Metin(kok, "message"));
+                status ?? Text(root, "errorCode"), Text(root, "message"));
 
         return new HostedCallbackResult(
             true, orderId,
@@ -132,88 +132,88 @@ public sealed class AhlPayConnector(IHttpClientFactory httpClientFactory) : IPay
             ConnectorTxnId: form.GetValueOrDefault("transId") ?? form.GetValueOrDefault("hostReferenceNumber"),
             MaskedPan: form.GetValueOrDefault("cardNumber"),
             CardBank: null,
-            UnifiedErrors.None, durum, null);
+            UnifiedErrors.None, status, null);
     }
 
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "api/Payment/Void", reference.OrderId, null, reference.ConnectorTxnId, ct);
+        => OperationAsync(credentials, "api/Payment/Void", reference.OrderId, null, reference.ConnectorTxnId, ct);
 
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "api/Payment/Refund", request.OrderId,
+        => OperationAsync(credentials, "api/Payment/Refund", request.OrderId,
             AhlPayMessages.Amount(request.AmountMinor), request.ConnectorTxnId, ct);
 
 
-    private async Task<ConnectorOperationResult> IslemAsync(
-        ConnectorCredentials credentials, string yol, string orderId, string? tutar,
+    private async Task<ConnectorOperationResult> OperationAsync(
+        ConnectorCredentials credentials, string path, string orderId, string? amount,
         string? txnId, CancellationToken ct)
     {
-        var rastgele = AhlPayMessages.Rastgele();
+        var random = AhlPayMessages.RandomNonce();
 
-        using var yanit = await GonderAsync(credentials, yol, new
+        using var response = await SendAsync(credentials, path, new
         {
-            merchantId = Sayi(credentials.Require("merchant_id")),
-            memberId = Sayi(credentials.Require("member_id")),
+            merchantId = ParseInt(credentials.Require("merchant_id")),
+            memberId = ParseInt(credentials.Require("member_id")),
             orderId,
-            totalAmount = tutar,
-            rnd = rastgele,
-            hash = AhlPayMessages.RequestHash(rastgele),
+            totalAmount = amount,
+            rnd = random,
+            hash = AhlPayMessages.RequestHash(random),
         }, ct);
 
-        return Bayrak(yanit.RootElement, "isSuccess")
+        return Flag(response.RootElement, "isSuccess")
             ? ConnectorOperationResult.Ok(txnId)
             : ConnectorOperationResult.Fail(
-                AhlPayMessages.UnifiedError(Metin(yanit.RootElement, "errorCode")),
-                Metin(yanit.RootElement, "errorCode"), Metin(yanit.RootElement, "message"));
+                AhlPayMessages.UnifiedError(Text(response.RootElement, "errorCode")),
+                Text(response.RootElement, "errorCode"), Text(response.RootElement, "message"));
     }
 
-    private async Task<string> BelirtecAlAsync(ConnectorCredentials credentials, CancellationToken ct)
+    private async Task<string> GetTokenAsync(ConnectorCredentials credentials, CancellationToken ct)
     {
-        using var yanit = await GonderAsync(credentials, "api/Security/AuthenticationMerchant", new
+        using var response = await SendAsync(credentials, "api/Security/AuthenticationMerchant", new
         {
             email = credentials.Require("user_code"),
             password = credentials.Require("password"),
-        }, ct, belirtecsiz: true);
+        }, ct, withoutToken: true);
 
-        var kok = yanit.RootElement;
-        var veri = kok.TryGetProperty("data", out var d) ? d : default;
-        var belirtec = Metin(veri, "token") ?? Metin(kok, "token");
+        var root = response.RootElement;
+        var data = root.TryGetProperty("data", out var d) ? d : default;
+        var token = Text(data, "token") ?? Text(root, "token");
 
-        return string.IsNullOrWhiteSpace(belirtec)
+        return string.IsNullOrWhiteSpace(token)
             ? throw new ConnectorUnavailableException("AHL Pay belirteci alınamadı.")
-            : belirtec;
+            : token;
     }
 
-    private async Task<JsonDocument> GonderAsync(
-        ConnectorCredentials credentials, string yol, object govde, CancellationToken ct,
-        bool belirtecsiz = false)
+    private async Task<JsonDocument> SendAsync(
+        ConnectorCredentials credentials, string path, object body, CancellationToken ct,
+        bool withoutToken = false)
     {
-        using var istek = new HttpRequestMessage(
-            HttpMethod.Post, $"{credentials.Require("gateway_base").TrimEnd('/')}/{yol}")
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"{credentials.Require("gateway_base").TrimEnd('/')}/{path}")
         {
-            Content = JsonContent.Create(govde),
+            Content = JsonContent.Create(body),
         };
 
-        if (!belirtecsiz)
-            istek.Headers.Authorization = new AuthenticationHeaderValue(
-                "Bearer", await BelirtecAlAsync(credentials, ct));
+        if (!withoutToken)
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer", await GetTokenAsync(credentials, ct));
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.SendAsync(istek, ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.SendAsync(request, ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"AHL Pay {yol} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"AHL Pay {path} → {(int)response.StatusCode}.");
 
-            return JsonDocument.Parse(metin);
+            return JsonDocument.Parse(text);
         }
         catch (HttpRequestException ex)
         {
             // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"AHL Pay {yol} ucuna ulaşılamadı.", ex);
+            throw new ConnectorUnavailableException($"AHL Pay {path} ucuna ulaşılamadı.", ex);
         }
         catch (JsonException ex)
         {
@@ -222,22 +222,22 @@ public sealed class AhlPayConnector(IHttpClientFactory httpClientFactory) : IPay
     }
 
     /// <summary>merchantId/memberId sayı gider — dize gönderirsek sağlayıcı 400 döner.</summary>
-    private static int Sayi(string deger)
-        => int.TryParse(deger, out var sayi)
-            ? sayi
-            : throw new ConnectorConfigurationException($"Sayısal olmayan kimlik alanı: '{deger}'.");
+    private static int ParseInt(string value)
+        => int.TryParse(value, out var number)
+            ? number
+            : throw new ConnectorConfigurationException($"Sayısal olmayan kimlik alanı: '{value}'.");
 
-    private static bool Bayrak(JsonElement element, string ad)
+    private static bool Flag(JsonElement element, string name)
         => element.ValueKind == JsonValueKind.Object
-           && element.TryGetProperty(ad, out var deger)
-           && deger.ValueKind == JsonValueKind.True;
+           && element.TryGetProperty(name, out var value)
+           && value.ValueKind == JsonValueKind.True;
 
-    private static string? Metin(JsonElement element, string ad)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(ad, out var deger)
-            ? deger.ValueKind switch
+    private static string? Text(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
             {
-                JsonValueKind.String => deger.GetString(),
-                JsonValueKind.Number => deger.ToString(),
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
                 _ => null,
             }
             : null;

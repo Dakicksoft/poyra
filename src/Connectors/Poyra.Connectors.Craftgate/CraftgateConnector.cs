@@ -35,15 +35,15 @@ public sealed class CraftgateConnector(IHttpClientFactory httpClientFactory) : I
     public const string ConnectorKey = "craftgate";
     public const string HttpClientName = "poyra-craftgate";
 
-    private const string OrtakSayfaBaslatYolu = "/payment/v1/checkout-payments/init";
-    private const string UcluBaslatYolu = "/payment/v1/card-payments/3ds-init";
-    private const string UcluTamamlaYolu = "/payment/v1/card-payments/3ds-complete";
-    private const string IadeYolu = "/payment/v1/refunds";
-    private const string KalemIadeYolu = "/payment/v1/refund-transactions";
+    private const string CheckoutInitPath = "/payment/v1/checkout-payments/init";
+    private const string ThreeDsInitPath = "/payment/v1/card-payments/3ds-init";
+    private const string ThreeDsCompletePath = "/payment/v1/card-payments/3ds-complete";
+    private const string RefundPath = "/payment/v1/refunds";
+    private const string ItemRefundPath = "/payment/v1/refund-transactions";
 
     // Tarayıcının POST'ladığı "token"/"paymentId" bunların üzerine yazamasın diye önekli.
-    private const string DurumToken = "poyra_cg_token";
-    private const string DurumOdemeNo = "poyra_cg_payment_id";
+    private const string StateToken = "poyra_cg_token";
+    private const string StatePaymentId = "poyra_cg_payment_id";
 
     public string Key => ConnectorKey;
 
@@ -69,13 +69,13 @@ public sealed class CraftgateConnector(IHttpClientFactory httpClientFactory) : I
     public async Task<HostedPaymentForm> InitiateHostedPaymentAsync(
         HostedPaymentRequest request, ConnectorCredentials credentials, CancellationToken ct)
     {
-        var tutar = CraftgateMessages.Price(request.AmountMinor);
-        var taksit = Math.Max(1, request.Installments);
+        var amount = CraftgateMessages.Price(request.AmountMinor);
+        var installment = Math.Max(1, request.Installments);
 
-        using var yanit = await GonderAsync(credentials, HttpMethod.Post, OrtakSayfaBaslatYolu, new
+        using var response = await SendAsync(credentials, HttpMethod.Post, CheckoutInitPath, new
         {
-            price = tutar,
-            paidPrice = tutar,
+            price = amount,
+            paidPrice = amount,
             currency = request.Currency.ToUpperInvariant(),
             paymentGroup = "PRODUCT",
             paymentPhase = "AUTH",
@@ -86,22 +86,22 @@ public sealed class CraftgateConnector(IHttpClientFactory httpClientFactory) : I
             clientIp = request.CustomerIp,
             // Taksit sayısı yukarıda çoktan karara bağlandı; sayfada tek seçenek açılır ki
             // müşteri başka bir taksite geçip tahsilat tutarını değiştiremesin.
-            enabledInstallments = new[] { taksit },
+            enabledInstallments = new[] { installment },
             items = new[]
             {
-                new { name = request.Description ?? "Siparis", price = tutar, externalId = request.OrderId },
+                new { name = request.Description ?? "Siparis", price = amount, externalId = request.OrderId },
             },
         }, ct);
 
-        var kok = yanit.RootElement;
-        var sayfa = Metin(kok, "pageUrl")
+        var root = response.RootElement;
+        var page = Text(root, "pageUrl")
             ?? throw new ConnectorUnavailableException("Craftgate ortak ödeme sayfası adresi dönmedi.");
-        var token = Metin(kok, "token")
+        var token = Text(root, "token")
             ?? throw new ConnectorUnavailableException("Craftgate ortak ödeme sayfası token dönmedi.");
 
         return new HostedPaymentForm(
-            sayfa, new Dictionary<string, string>(), Method: "GET",
-            ConnectorState: new Dictionary<string, string> { [DurumToken] = token });
+            page, new Dictionary<string, string>(), Method: "GET",
+            ConnectorState: new Dictionary<string, string> { [StateToken] = token });
     }
 
 
@@ -109,12 +109,12 @@ public sealed class CraftgateConnector(IHttpClientFactory httpClientFactory) : I
         DirectPaymentRequest request, string callbackUrl, ConnectorCredentials credentials,
         CancellationToken ct)
     {
-        var tutar = CraftgateMessages.Price(request.AmountMinor);
+        var amount = CraftgateMessages.Price(request.AmountMinor);
 
-        using var yanit = await GonderAsync(credentials, HttpMethod.Post, UcluBaslatYolu, new
+        using var response = await SendAsync(credentials, HttpMethod.Post, ThreeDsInitPath, new
         {
-            price = tutar,
-            paidPrice = tutar,
+            price = amount,
+            paidPrice = amount,
             currency = request.Currency.ToUpperInvariant(),
             installment = Math.Max(1, request.Installments),
             paymentGroup = "PRODUCT",
@@ -135,24 +135,24 @@ public sealed class CraftgateConnector(IHttpClientFactory httpClientFactory) : I
             },
             items = new[]
             {
-                new { name = request.Description ?? "Siparis", price = tutar, externalId = request.OrderId },
+                new { name = request.Description ?? "Siparis", price = amount, externalId = request.OrderId },
             },
         }, ct);
 
-        var kok = yanit.RootElement;
+        var root = response.RootElement;
 
-        var form = CraftgateMessages.FormuCoz(Metin(kok, "htmlContent"));
-        if (form is not { } cikan)
+        var form = CraftgateMessages.DecodeForm(Text(root, "htmlContent"));
+        if (form is not { } extracted)
             throw new ConnectorUnavailableException("Craftgate 3D yanıtında beklenen form yok.");
 
         // Tamamlama çağrısı bu kimlikle yapılır. Dönüşte tarayıcı da bir paymentId
         // POST'lar ama ona bakmıyoruz — başkasının ödemesini tamamlatabilirdi.
-        var odemeNo = Metin(kok, "paymentId")
+        var paymentId = Text(root, "paymentId")
             ?? throw new ConnectorUnavailableException("Craftgate 3D başlatma paymentId dönmedi.");
 
         return new HostedPaymentForm(
-            cikan.ActionUrl, cikan.Fields,
-            ConnectorState: new Dictionary<string, string> { [DurumOdemeNo] = odemeNo });
+            extracted.ActionUrl, extracted.Fields,
+            ConnectorState: new Dictionary<string, string> { [StatePaymentId] = paymentId });
     }
 
     /// <summary>
@@ -170,184 +170,184 @@ public sealed class CraftgateConnector(IHttpClientFactory httpClientFactory) : I
     public async Task<HostedCallbackResult> CompleteHostedCallbackAsync(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials, CancellationToken ct)
     {
-        var token = form.GetValueOrDefault(DurumToken);
-        var odemeNo = form.GetValueOrDefault(DurumOdemeNo);
+        var token = form.GetValueOrDefault(StateToken);
+        var paymentId = form.GetValueOrDefault(StatePaymentId);
 
         // Ortak sayfa akışı token ile, direct akış paymentId ile sorulur. İkisi de yoksa
         // sonuç bilinemez: tarayıcının gönderdiğine dönmek yerine başarısız saymak,
         // yanlış bir "ödendi"den her hâlükârda ucuzdur.
-        using var yanit =
+        using var response =
             !string.IsNullOrEmpty(token)
-                ? await GonderAsync(credentials, HttpMethod.Get,
+                ? await SendAsync(credentials, HttpMethod.Get,
                     $"/payment/v1/checkout-payments/{Uri.EscapeDataString(token)}", null, ct)
-            : long.TryParse(odemeNo, CultureInfo.InvariantCulture, out var no)
-                ? await GonderAsync(credentials, HttpMethod.Post, UcluTamamlaYolu,
-                    new { paymentId = no }, ct)
+            : long.TryParse(paymentId, CultureInfo.InvariantCulture, out var number)
+                ? await SendAsync(credentials, HttpMethod.Post, ThreeDsCompletePath,
+                    new { paymentId = number }, ct)
                 : null;
 
-        return yanit is null
-            ? Basarisiz(form, "Craftgate sorgu kimliği dönüşte yok; sonuç doğrulanamadı.")
-            : SonucuOku(yanit.RootElement, form);
+        return response is null
+            ? Failed(form, "Craftgate sorgu kimliği dönüşte yok; sonuç doğrulanamadı.")
+            : ReadResult(response.RootElement, form);
     }
 
-    private static HostedCallbackResult SonucuOku(JsonElement kok, IReadOnlyDictionary<string, string> form)
+    private static HostedCallbackResult ReadResult(JsonElement root, IReadOnlyDictionary<string, string> form)
     {
-        var durum = Metin(kok, "paymentStatus");
-        var orderId = Metin(kok, "conversationId")
+        var status = Text(root, "paymentStatus");
+        var orderId = Text(root, "conversationId")
                       ?? form.GetValueOrDefault("conversationId", string.Empty);
 
-        if (!CraftgateMessages.Onaylandi(durum))
+        if (!CraftgateMessages.IsApproved(status))
         {
-            var (grup, kod, mesaj) = HatayiOku(kok);
+            var (errorGroup, code, message) = ReadError(root);
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                CraftgateMessages.UnifiedError(grup, kod), kod ?? durum, mesaj);
+                CraftgateMessages.UnifiedError(errorGroup, code), code ?? status, message);
         }
 
         return new HostedCallbackResult(
             true, orderId,
-            AuthCode: Metin(kok, "authCode"),
+            AuthCode: Text(root, "authCode"),
             // İptal/iade paymentId ile yapılır — referansı burada saklıyoruz.
-            ConnectorTxnId: Metin(kok, "id"),
-            MaskedPan: Metin(kok, "binNumber") is { } bin ? bin + "******" : null,
-            CardBank: Metin(kok, "cardIssuerBankName"),
-            UnifiedErrors.None, durum, null);
+            ConnectorTxnId: Text(root, "id"),
+            MaskedPan: Text(root, "binNumber") is { } bin ? bin + "******" : null,
+            CardBank: Text(root, "cardIssuerBankName"),
+            UnifiedErrors.None, status, null);
     }
 
 
     public async Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
     {
-        if (!long.TryParse(reference.ConnectorTxnId, CultureInfo.InvariantCulture, out var odemeNo))
+        if (!long.TryParse(reference.ConnectorTxnId, CultureInfo.InvariantCulture, out var paymentId))
             return ConnectorOperationResult.Fail(
                 UnifiedErrors.ProcessingError, null, "Craftgate ödeme numarası yok; iptal yapılamaz.");
 
-        using var yanit = await GonderAsync(credentials, HttpMethod.Post, IadeYolu, new
+        using var response = await SendAsync(credentials, HttpMethod.Post, RefundPath, new
         {
-            paymentId = odemeNo,
+            paymentId = paymentId,
             conversationId = reference.OrderId,
             refundDestinationType = "PROVIDER",
         }, ct);
 
-        var kok = yanit.RootElement;
-        if (!CraftgateMessages.IadeOnaylandi(Metin(kok, "status")))
-            return IadeHatasi(kok);
+        var root = response.RootElement;
+        if (!CraftgateMessages.IsRefundApproved(Text(root, "status")))
+            return RefundError(root);
 
         // refundType = CANCEL | REFUND — hangisi olduğu ham kodda kalır.
         return new ConnectorOperationResult(
-            true, reference.ConnectorTxnId, null, Metin(kok, "refundType"), null);
+            true, reference.ConnectorTxnId, null, Text(root, "refundType"), null);
     }
 
     public async Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
     {
-        if (!long.TryParse(request.ConnectorTxnId, CultureInfo.InvariantCulture, out var odemeNo))
+        if (!long.TryParse(request.ConnectorTxnId, CultureInfo.InvariantCulture, out var paymentId))
             return ConnectorOperationResult.Fail(
                 UnifiedErrors.ProcessingError, null, "Craftgate ödeme numarası yok; iade yapılamaz.");
 
-        var kalemNo = await KalemNumarasiAsync(credentials, odemeNo, ct);
-        if (kalemNo is null)
+        var itemId = await GetItemIdAsync(credentials, paymentId, ct);
+        if (itemId is null)
             return ConnectorOperationResult.Fail(
                 UnifiedErrors.ProcessingError, null,
                 "Craftgate ödeme kalemi okunamadı; iade tutarı bir kaleme bağlanamadı.");
 
-        using var yanit = await GonderAsync(credentials, HttpMethod.Post, KalemIadeYolu, new
+        using var response = await SendAsync(credentials, HttpMethod.Post, ItemRefundPath, new
         {
-            paymentTransactionId = kalemNo.Value,
+            paymentTransactionId = itemId.Value,
             conversationId = request.OrderId,
             refundPrice = CraftgateMessages.Price(request.AmountMinor),
             refundDestinationType = "PROVIDER",
         }, ct);
 
-        var kok = yanit.RootElement;
-        return CraftgateMessages.IadeOnaylandi(Metin(kok, "status"))
+        var root = response.RootElement;
+        return CraftgateMessages.IsRefundApproved(Text(root, "status"))
             ? ConnectorOperationResult.Ok(request.ConnectorTxnId)
-            : IadeHatasi(kok);
+            : RefundError(root);
     }
 
-    private async Task<long?> KalemNumarasiAsync(
-        ConnectorCredentials credentials, long odemeNo, CancellationToken ct)
+    private async Task<long?> GetItemIdAsync(
+        ConnectorCredentials credentials, long paymentId, CancellationToken ct)
     {
-        using var yanit = await GonderAsync(credentials, HttpMethod.Get,
-            $"/payment/v1/card-payments/{odemeNo.ToString(CultureInfo.InvariantCulture)}", null, ct);
+        using var response = await SendAsync(credentials, HttpMethod.Get,
+            $"/payment/v1/card-payments/{paymentId.ToString(CultureInfo.InvariantCulture)}", null, ct);
 
-        if (!yanit.RootElement.TryGetProperty("paymentTransactions", out var kalemler)
-            || kalemler.ValueKind != JsonValueKind.Array || kalemler.GetArrayLength() == 0)
+        if (!response.RootElement.TryGetProperty("paymentTransactions", out var items)
+            || items.ValueKind != JsonValueKind.Array || items.GetArrayLength() == 0)
             return null;
 
         // Poyra tek kalemli sepet gönderiyor; birden fazlası gelirse iade tutarının
         // hangi kaleme yazılacağı belirsizdir ve sessizce ilkine yazmak yanlış olur.
-        if (kalemler.GetArrayLength() > 1) return null;
+        if (items.GetArrayLength() > 1) return null;
 
-        return long.TryParse(Metin(kalemler[0], "id"), CultureInfo.InvariantCulture, out var kalemNo)
-            ? kalemNo
+        return long.TryParse(Text(items[0], "id"), CultureInfo.InvariantCulture, out var itemId)
+            ? itemId
             : null;
     }
 
 
-    private static ConnectorOperationResult IadeHatasi(JsonElement kok)
+    private static ConnectorOperationResult RefundError(JsonElement root)
     {
-        var (grup, kod, mesaj) = HatayiOku(kok);
+        var (errorGroup, code, message) = ReadError(root);
         return ConnectorOperationResult.Fail(
-            CraftgateMessages.UnifiedError(grup, kod),
-            kod ?? Metin(kok, "status"),
-            mesaj ?? "Craftgate iade/iptal onaylanmadı.");
+            CraftgateMessages.UnifiedError(errorGroup, code),
+            code ?? Text(root, "status"),
+            message ?? "Craftgate iade/iptal onaylanmadı.");
     }
 
-    private static HostedCallbackResult Basarisiz(
-        IReadOnlyDictionary<string, string> form, string mesaj)
+    private static HostedCallbackResult Failed(
+        IReadOnlyDictionary<string, string> form, string message)
         => new(false, form.GetValueOrDefault("conversationId", string.Empty),
-            null, null, null, null, UnifiedErrors.ProcessingError, null, mesaj);
+            null, null, null, null, UnifiedErrors.ProcessingError, null, message);
 
-    private static (string? Grup, string? Kod, string? Mesaj) HatayiOku(JsonElement kok)
+    private static (string? Group, string? Code, string? Message) ReadError(JsonElement root)
     {
-        var kaynak = kok.ValueKind == JsonValueKind.Object
-                     && kok.TryGetProperty("paymentError", out var hata)
-                     && hata.ValueKind == JsonValueKind.Object
-            ? hata
-            : kok;
+        var source = root.ValueKind == JsonValueKind.Object
+                     && root.TryGetProperty("paymentError", out var error)
+                     && error.ValueKind == JsonValueKind.Object
+            ? error
+            : root;
 
-        return (Metin(kaynak, "errorGroup"), Metin(kaynak, "errorCode"), Metin(kaynak, "errorDescription"));
+        return (Text(source, "errorGroup"), Text(source, "errorCode"), Text(source, "errorDescription"));
     }
 
-    private async Task<JsonDocument> GonderAsync(
-        ConnectorCredentials credentials, HttpMethod yontem, string yol, object? govde, CancellationToken ct)
+    private async Task<JsonDocument> SendAsync(
+        ConnectorCredentials credentials, HttpMethod method, string path, object? body, CancellationToken ct)
     {
-        var adres = credentials.Require("gateway_base").TrimEnd('/');
-        var json = govde is null ? string.Empty : JsonSerializer.Serialize(govde);
-        var rastgele = CraftgateMessages.RastgeleAnahtar();
+        var url = credentials.Require("gateway_base").TrimEnd('/');
+        var json = body is null ? string.Empty : JsonSerializer.Serialize(body);
+        var random = CraftgateMessages.RandomKey();
 
-        using var istek = new HttpRequestMessage(yontem, adres + yol);
-        if (govde is not null)
-            istek.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        using var request = new HttpRequestMessage(method, url + path);
+        if (body is not null)
+            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
         // İmza yolu ve SERVİS ADRESİNİ de kapsar: aynı gövdeyi başka bir uca ya da
         // başka bir ortama göndermek doğrulamayı kırar.
-        istek.Headers.TryAddWithoutValidation("x-api-key", credentials.Require("api_key"));
-        istek.Headers.TryAddWithoutValidation("x-rnd-key", rastgele);
-        istek.Headers.TryAddWithoutValidation("x-auth-version", "v1");
-        istek.Headers.TryAddWithoutValidation("x-signature", CraftgateMessages.Imza(
-            adres, yol, credentials.Require("api_key"), credentials.Require("secret_key"),
-            rastgele, json));
-        istek.Headers.TryAddWithoutValidation("accept", "application/json");
+        request.Headers.TryAddWithoutValidation("x-api-key", credentials.Require("api_key"));
+        request.Headers.TryAddWithoutValidation("x-rnd-key", random);
+        request.Headers.TryAddWithoutValidation("x-auth-version", "v1");
+        request.Headers.TryAddWithoutValidation("x-signature", CraftgateMessages.Signature(
+            url, path, credentials.Require("api_key"), credentials.Require("secret_key"),
+            random, json));
+        request.Headers.TryAddWithoutValidation("accept", "application/json");
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.SendAsync(istek, ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.SendAsync(request, ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
             // 4xx gövdesi hata ayrıntısını taşır ve çağıran onu okuyup birleşik koda
             // çevirebilmeli; yalnız 5xx/ağ hatası "konnektör ayakta değil" sayılır.
-            if ((int)yanit.StatusCode >= 500)
-                throw new ConnectorUnavailableException($"Craftgate {yol} → {(int)yanit.StatusCode}.");
+            if ((int)response.StatusCode >= 500)
+                throw new ConnectorUnavailableException($"Craftgate {path} → {(int)response.StatusCode}.");
 
-            return JsonDocument.Parse(metin);
+            return JsonDocument.Parse(text);
         }
         catch (HttpRequestException ex)
         {
             // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"Craftgate {yol} ucuna ulaşılamadı.", ex);
+            throw new ConnectorUnavailableException($"Craftgate {path} ucuna ulaşılamadı.", ex);
         }
         catch (JsonException ex)
         {
@@ -355,12 +355,12 @@ public sealed class CraftgateConnector(IHttpClientFactory httpClientFactory) : I
         }
     }
 
-    private static string? Metin(JsonElement element, string ad)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(ad, out var deger)
-            ? deger.ValueKind switch
+    private static string? Text(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
             {
-                JsonValueKind.String => deger.GetString(),
-                JsonValueKind.Number => deger.ToString(),
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
                 _ => null,
             }
             : null;

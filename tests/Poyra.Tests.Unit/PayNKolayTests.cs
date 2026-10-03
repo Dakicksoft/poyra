@@ -41,9 +41,9 @@ public sealed class PayNKolayTests
     {
         // Diğer sağlayıcıların çoğunda onay "00"dır; buradaki "2" karıştırılırsa
         // başarılı ödemeler reddedilir (ya da tersi).
-        PayNKolayMessages.Onaylandi("2").ShouldBeTrue();
-        PayNKolayMessages.Onaylandi("00").ShouldBeFalse();
-        PayNKolayMessages.Onaylandi("0").ShouldBeFalse();
+        PayNKolayMessages.IsApproved("2").ShouldBeTrue();
+        PayNKolayMessages.IsApproved("00").ShouldBeFalse();
+        PayNKolayMessages.IsApproved("0").ShouldBeFalse();
     }
 
     [Fact]

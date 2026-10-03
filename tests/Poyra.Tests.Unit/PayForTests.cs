@@ -81,7 +81,7 @@ public sealed class PayForImzaTests
     public void API_yaniti_noktali_virgulle_ayrilmis_cift_listesi_olarak_okunmali()
     {
         // İptal/iade uçları JSON ya da XML değil, "Ad=Deger;Ad=Deger" düz metni döner.
-        var alanlar = PayForMessages.Oku(
+        var alanlar = PayForMessages.Parse(
             "AuthCode=123456;HostRefNum=987;ProcReturnCode=00;TransId=T1;ErrMsg=");
 
         alanlar["ProcReturnCode"].ShouldBe("00");
@@ -97,7 +97,7 @@ public sealed class PayForImzaTests
     {
         // Banka HTML hata sayfası döndürebilir; susup boş dönmek, yanlış ayrıştırılmış
         // bir "ProcReturnCode=00" üretmekten iyidir (fail closed).
-        PayForMessages.Oku(govde).ShouldNotContainKey("ProcReturnCode");
+        PayForMessages.Parse(govde).ShouldNotContainKey("ProcReturnCode");
     }
 }
 

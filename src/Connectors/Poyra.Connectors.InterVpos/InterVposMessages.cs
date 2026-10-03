@@ -81,19 +81,19 @@ public static class InterVposMessages
     /// ayrılmasından oluşur (JSON/XML değil). Bozuk gövde boş sözlük döner —
     /// çağıran "başarısız" sayar (fail closed).
     /// </summary>
-    public static IReadOnlyDictionary<string, string> Oku(string govde)
+    public static IReadOnlyDictionary<string, string> Parse(string body)
     {
-        var sonuc = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(govde)) return sonuc;
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(body)) return result;
 
-        foreach (var parca in govde.Split([";;;", ";;"], StringSplitOptions.RemoveEmptyEntries))
+        foreach (var part in body.Split([";;;", ";;"], StringSplitOptions.RemoveEmptyEntries))
         {
-            var esittir = parca.IndexOf('=');
-            if (esittir <= 0) continue;
+            var equalsIndex = part.IndexOf('=');
+            if (equalsIndex <= 0) continue;
 
-            sonuc.TryAdd(parca[..esittir].Trim(), parca[(esittir + 1)..].Trim());
+            result.TryAdd(part[..equalsIndex].Trim(), part[(equalsIndex + 1)..].Trim());
         }
 
-        return sonuc;
+        return result;
     }
 }

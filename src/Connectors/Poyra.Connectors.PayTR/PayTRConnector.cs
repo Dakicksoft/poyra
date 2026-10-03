@@ -59,27 +59,27 @@ public sealed class PayTRConnector(IHttpClientFactory httpClientFactory) : IPaym
         var merchantSalt = credentials.Require("merchant_salt");
         var testMode = credentials.Get("test_mode") ?? "0";
 
-        var tutar = PayTRMessages.Amount(request.AmountMinor);
+        var amount = PayTRMessages.Amount(request.AmountMinor);
         var ip = request.CustomerIp ?? "0.0.0.0";
-        var taksit = request.Installments > 1 ? request.Installments.ToString() : "0";
-        var eposta = "musteri@poyra.local";
-        const string paraBirimi = "TL";
+        var installment = request.Installments > 1 ? request.Installments.ToString() : "0";
+        var email = "musteri@poyra.local";
+        const string currencyCode = "TL";
 
-        var sepet = JsonSerializer.Serialize(new[]
+        var basket = JsonSerializer.Serialize(new[]
         {
-            new object[] { request.Description ?? "Siparis", tutar, 1 },
+            new object[] { request.Description ?? "Siparis", amount, 1 },
         });
 
-        var alanlar = new Dictionary<string, string>(StringComparer.Ordinal)
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["merchant_id"] = merchantId,
             ["user_ip"] = ip,
             ["merchant_oid"] = request.OrderId,
-            ["email"] = eposta,
+            ["email"] = email,
             ["payment_type"] = "card",
-            ["payment_amount"] = tutar,
-            ["installment_count"] = taksit,
-            ["currency"] = paraBirimi,
+            ["payment_amount"] = amount,
+            ["installment_count"] = installment,
+            ["currency"] = currencyCode,
             ["test_mode"] = testMode,
             // 3DS'siz akış kullanılmıyor: kart doğrulaması bankada yapılmalı.
             ["non_3d"] = "0",
@@ -93,29 +93,29 @@ public sealed class PayTRConnector(IHttpClientFactory httpClientFactory) : IPaym
             ["user_name"] = request.Card.HolderName ?? "Poyra Musteri",
             ["user_address"] = "Bilinmiyor",
             ["user_phone"] = "0000000000",
-            ["user_basket"] = sepet,
+            ["user_basket"] = basket,
             ["paytr_token"] = PayTRMessages.RequestToken(
-                merchantId, ip, request.OrderId, eposta, tutar, "card", taksit,
-                paraBirimi, testMode, "0", merchantKey, merchantSalt),
+                merchantId, ip, request.OrderId, email, amount, "card", installment,
+                currencyCode, testMode, "0", merchantKey, merchantSalt),
         };
 
-        var adres = $"{credentials.Require("gateway_base").TrimEnd('/')}/odeme";
+        var url = $"{credentials.Require("gateway_base").TrimEnd('/')}/odeme";
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.PostAsync(adres, new FormUrlEncodedContent(alanlar), ct);
-            var govde = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.PostAsync(url, new FormUrlEncodedContent(fields), ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"PayTR /odeme → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"PayTR /odeme → {(int)response.StatusCode}.");
 
-            var form = ConnectorHtml.FormuCikar(govde);
-            if (form is not { } cikan)
+            var form = ConnectorHtml.ExtractForm(body);
+            if (form is not { } extracted)
                 throw new ConnectorUnavailableException(
                     "PayTR 3D adımı için beklenen yönlendirme formu dönmedi.");
 
-            return new HostedPaymentForm(cikan.ActionUrl, cikan.Fields);
+            return new HostedPaymentForm(extracted.ActionUrl, extracted.Fields);
         }
         catch (HttpRequestException ex)
         {
@@ -133,24 +133,24 @@ public sealed class PayTRConnector(IHttpClientFactory httpClientFactory) : IPaym
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials)
     {
         var orderId = form.GetValueOrDefault("merchant_oid", string.Empty);
-        var durum = form.GetValueOrDefault("status");
-        var tutar = form.GetValueOrDefault("total_amount", string.Empty);
+        var status = form.GetValueOrDefault("status");
+        var amount = form.GetValueOrDefault("total_amount", string.Empty);
 
-        var beklenen = PayTRMessages.NotificationHash(
-            orderId, durum ?? string.Empty, tutar,
+        var expected = PayTRMessages.NotificationHash(
+            orderId, status ?? string.Empty, amount,
             credentials.Require("merchant_key"), credentials.Require("merchant_salt"));
 
-        if (!PayTRMessages.ImzaGecerli(form.GetValueOrDefault("hash"), beklenen))
+        if (!PayTRMessages.IsSignatureValid(form.GetValueOrDefault("hash"), expected))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                UnifiedErrors.SignatureInvalid, durum,
+                UnifiedErrors.SignatureInvalid, status,
                 "PayTR bildirim imzası doğrulanamadı (tarayıcı dönüşü kanıt değildir).");
 
-        if (!PayTRMessages.Onaylandi(durum))
+        if (!PayTRMessages.IsApproved(status))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
                 PayTRMessages.UnifiedError(form.GetValueOrDefault("failed_reason_code")),
-                durum, form.GetValueOrDefault("failed_reason_msg"));
+                status, form.GetValueOrDefault("failed_reason_msg"));
 
         return new HostedCallbackResult(
             true, orderId,
@@ -158,7 +158,7 @@ public sealed class PayTRConnector(IHttpClientFactory httpClientFactory) : IPaym
             ConnectorTxnId: form.GetValueOrDefault("payment_id"),
             MaskedPan: null,
             CardBank: null,
-            UnifiedErrors.None, durum, null);
+            UnifiedErrors.None, status, null);
     }
 
 
@@ -174,38 +174,38 @@ public sealed class PayTRConnector(IHttpClientFactory httpClientFactory) : IPaym
         var merchantId = credentials.Require("merchant_id");
         var merchantKey = credentials.Require("merchant_key");
         var merchantSalt = credentials.Require("merchant_salt");
-        var tutar = PayTRMessages.Amount(request.AmountMinor);
+        var amount = PayTRMessages.Amount(request.AmountMinor);
 
-        var alanlar = new Dictionary<string, string>(StringComparer.Ordinal)
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["merchant_id"] = merchantId,
             ["merchant_oid"] = request.OrderId,
-            ["return_amount"] = tutar,
+            ["return_amount"] = amount,
             // İade imzası kendi alan listesini kullanır: sipariş + tutar + tuz.
             ["paytr_token"] = PayTRMessages.RefundToken(
-                merchantId, request.OrderId, tutar, merchantKey, merchantSalt),
+                merchantId, request.OrderId, amount, merchantKey, merchantSalt),
         };
 
-        var adres = $"{credentials.Require("gateway_base").TrimEnd('/')}/odeme/iade";
+        var url = $"{credentials.Require("gateway_base").TrimEnd('/')}/odeme/iade";
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.PostAsync(adres, new FormUrlEncodedContent(alanlar), ct);
-            var govde = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.PostAsync(url, new FormUrlEncodedContent(fields), ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"PayTR iade → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"PayTR iade → {(int)response.StatusCode}.");
 
-            using var belge = JsonDocument.Parse(govde);
-            var durum = belge.RootElement.TryGetProperty("status", out var d) ? d.GetString() : null;
+            using var document = JsonDocument.Parse(body);
+            var status = document.RootElement.TryGetProperty("status", out var d) ? d.GetString() : null;
 
-            return durum == "success"
+            return status == "success"
                 ? ConnectorOperationResult.Ok(request.ConnectorTxnId)
                 : ConnectorOperationResult.Fail(
                     UnifiedErrors.ProcessingError,
-                    belge.RootElement.TryGetProperty("err_no", out var k) ? k.ToString() : null,
-                    belge.RootElement.TryGetProperty("err_msg", out var m) ? m.GetString() : null);
+                    document.RootElement.TryGetProperty("err_no", out var k) ? k.ToString() : null,
+                    document.RootElement.TryGetProperty("err_msg", out var m) ? m.GetString() : null);
         }
         catch (HttpRequestException ex)
         {

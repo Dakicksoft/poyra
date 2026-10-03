@@ -24,15 +24,15 @@ public abstract class BoaConnectorBase(IHttpClientFactory httpClientFactory) : I
     public abstract ConnectorDescriptor Descriptor { get; }
 
     /// <summary>Bankanın XML kök elemanı (ör. <c>KuveytTurkVPosMessage</c>).</summary>
-    protected abstract string XmlKokEleman { get; }
+    protected abstract string XmlRootElement { get; }
 
     /// <summary>Provizyonda MD'yi saran eleman (ör. <c>KuveytTurkVPosAdditionalData</c>).</summary>
-    protected abstract string XmlEkVeriEleman { get; }
+    protected abstract string XmlExtraDataElement { get; }
 
     /// <summary>Gateway yolu öneki — banka kurulumuna göre değişir (ör. boş ya da <c>VirtualPOS.Gateway</c>).</summary>
-    protected virtual string GatewayOnEk => string.Empty;
+    protected virtual string GatewayPrefix => string.Empty;
 
-    protected static IReadOnlyList<CredentialField> OrtakKimlikAlanlari =>
+    protected static IReadOnlyList<CredentialField> CommonCredentialFields =>
     [
         new("gateway_base", "Gateway adresi (bankadan alınır)"),
         new("merchant_id", "Üye işyeri no (MerchantId)"),
@@ -46,7 +46,7 @@ public abstract class BoaConnectorBase(IHttpClientFactory httpClientFactory) : I
     {
         var merchantId = credentials.Require("merchant_id");
         var userName = credentials.Require("user_name");
-        var parola = credentials.Require("password");
+        var password = credentials.Require("password");
         var amount = BoaMessages.Amount(request.AmountMinor);
 
         var fields = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -63,13 +63,13 @@ public abstract class BoaConnectorBase(IHttpClientFactory httpClientFactory) : I
             // TODO(cert): bu beklenti dokümanla teyit edilmeli.
             ["InstallmentCount"] = request.Installments > 1 ? request.Installments.ToString() : "0",
             ["TransactionSecurity"] = "3",
-            ["HashPassword"] = BoaMessages.HashedPassword(parola),
+            ["HashPassword"] = BoaMessages.HashedPassword(password),
             ["HashData"] = BoaMessages.RequestHash(
                 merchantId, request.OrderId, amount, request.CallbackUrl, request.CallbackUrl,
-                userName, parola),
+                userName, password),
         };
 
-        return Task.FromResult(new HostedPaymentForm(Adres(credentials, "ThreeDModelPayGate"), fields));
+        return Task.FromResult(new HostedPaymentForm(Endpoint(credentials, "ThreeDModelPayGate"), fields));
     }
 
     /// <summary>
@@ -80,7 +80,7 @@ public abstract class BoaConnectorBase(IHttpClientFactory httpClientFactory) : I
     public HostedCallbackResult ParseAndValidateCallback(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials)
     {
-        var (orderId, responseCode, message, _) = DonusuOku(form);
+        var (orderId, responseCode, message, _) = ReadReturn(form);
 
         return new HostedCallbackResult(
             false, orderId, null, null, null, null,
@@ -94,7 +94,7 @@ public abstract class BoaConnectorBase(IHttpClientFactory httpClientFactory) : I
     public async Task<HostedCallbackResult> CompleteHostedCallbackAsync(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials, CancellationToken ct)
     {
-        var (orderId, responseCode, message, md) = DonusuOku(form);
+        var (orderId, responseCode, message, md) = ReadReturn(form);
 
         if (!BoaMessages.IsApprovedCode(responseCode))
             return new HostedCallbackResult(
@@ -111,85 +111,85 @@ public abstract class BoaConnectorBase(IHttpClientFactory httpClientFactory) : I
         var merchantId = credentials.Require("merchant_id");
         var userName = credentials.Require("user_name");
 
-        var govde = BoaMessages.ProvisionRequestXml(
-            XmlKokEleman, XmlEkVeriEleman, merchantId, credentials.Require("customer_id"),
+        var body = BoaMessages.ProvisionRequestXml(
+            XmlRootElement, XmlExtraDataElement, merchantId, credentials.Require("customer_id"),
             userName, orderId, amount, installmentCount: 0, md,
             BoaMessages.ProvisionHash(
                 merchantId, orderId, amount, userName, credentials.Require("password")));
 
-        var provizyon = BoaMessages.Oku(
-            await GonderAsync(Adres(credentials, "ThreeDModelProvisionGate"), govde, ct));
-        var provizyonKodu = provizyon.GetValueOrDefault("ResponseCode");
+        var provision = BoaMessages.Parse(
+            await SendAsync(Endpoint(credentials, "ThreeDModelProvisionGate"), body, ct));
+        var provisionCode = provision.GetValueOrDefault("ResponseCode");
 
-        if (!BoaMessages.IsApprovedCode(provizyonKodu))
+        if (!BoaMessages.IsApprovedCode(provisionCode))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                BoaMessages.UnifiedError(provizyonKodu), provizyonKodu,
-                provizyon.GetValueOrDefault("ResponseMessage"));
+                BoaMessages.UnifiedError(provisionCode), provisionCode,
+                provision.GetValueOrDefault("ResponseMessage"));
 
         return new HostedCallbackResult(
             true, orderId,
-            provizyon.GetValueOrDefault("ProvisionNumber"),
-            provizyon.GetValueOrDefault("OrderId") ?? provizyon.GetValueOrDefault("RRN"),
-            provizyon.GetValueOrDefault("MaskedPan"),
+            provision.GetValueOrDefault("ProvisionNumber"),
+            provision.GetValueOrDefault("OrderId") ?? provision.GetValueOrDefault("RRN"),
+            provision.GetValueOrDefault("MaskedPan"),
             Descriptor.DisplayName,
-            UnifiedErrors.None, provizyonKodu, null);
+            UnifiedErrors.None, provisionCode, null);
     }
 
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "SaleReversal", reference.OrderId, reference.ConnectorTxnId,
-            tutar: "0", BoaMessages.IptalXml, ct);
+        => OperationAsync(credentials, "SaleReversal", reference.OrderId, reference.ConnectorTxnId,
+            amount: "0", BoaMessages.CancelXml, ct);
 
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "PartialDrawBack", request.OrderId, request.ConnectorTxnId,
-            BoaMessages.Amount(request.AmountMinor), BoaMessages.KismiIadeXml, ct);
+        => OperationAsync(credentials, "PartialDrawBack", request.OrderId, request.ConnectorTxnId,
+            BoaMessages.Amount(request.AmountMinor), BoaMessages.PartialRefundXml, ct);
 
-    private async Task<ConnectorOperationResult> IslemAsync(
-        ConnectorCredentials credentials, string uc, string merchantOrderId, string? orderId,
-        string tutar,
-        Func<string, string, string, string, string, string, string, string, string, string> govdeKur,
+    private async Task<ConnectorOperationResult> OperationAsync(
+        ConnectorCredentials credentials, string endpoint, string merchantOrderId, string? orderId,
+        string amount,
+        Func<string, string, string, string, string, string, string, string, string, string> buildBody,
         CancellationToken ct)
     {
         var merchantId = credentials.Require("merchant_id");
         var userName = credentials.Require("user_name");
-        var parola = credentials.Require("password");
+        var password = credentials.Require("password");
 
-        var govde = govdeKur(
-            XmlKokEleman, merchantId, credentials.Require("customer_id"), userName,
-            BoaMessages.HashedPassword(parola), merchantOrderId, orderId ?? string.Empty, tutar,
-            BoaMessages.ProvisionHash(merchantId, merchantOrderId, tutar, userName, parola));
+        var body = buildBody(
+            XmlRootElement, merchantId, credentials.Require("customer_id"), userName,
+            BoaMessages.HashedPassword(password), merchantOrderId, orderId ?? string.Empty, amount,
+            BoaMessages.ProvisionHash(merchantId, merchantOrderId, amount, userName, password));
 
-        var yanit = BoaMessages.Oku(await GonderAsync(Adres(credentials, uc), govde, ct));
-        var kod = yanit.GetValueOrDefault("ResponseCode");
+        var response = BoaMessages.Parse(await SendAsync(Endpoint(credentials, endpoint), body, ct));
+        var code = response.GetValueOrDefault("ResponseCode");
 
-        return BoaMessages.IsApprovedCode(kod)
-            ? ConnectorOperationResult.Ok(yanit.GetValueOrDefault("OrderId") ?? orderId)
+        return BoaMessages.IsApprovedCode(code)
+            ? ConnectorOperationResult.Ok(response.GetValueOrDefault("OrderId") ?? orderId)
             : ConnectorOperationResult.Fail(
-                BoaMessages.UnifiedError(kod), kod, yanit.GetValueOrDefault("ResponseMessage"));
+                BoaMessages.UnifiedError(code), code, response.GetValueOrDefault("ResponseMessage"));
     }
 
 
-    private string Adres(ConnectorCredentials credentials, string uc)
+    private string Endpoint(ConnectorCredentials credentials, string endpoint)
     {
-        var taban = credentials.Require("gateway_base").TrimEnd('/');
-        return GatewayOnEk.Length == 0 ? $"{taban}/Home/{uc}" : $"{taban}/{GatewayOnEk}/Home/{uc}";
+        var baseUrl = credentials.Require("gateway_base").TrimEnd('/');
+        return GatewayPrefix.Length == 0 ? $"{baseUrl}/Home/{endpoint}" : $"{baseUrl}/{GatewayPrefix}/Home/{endpoint}";
     }
 
-    private async Task<string> GonderAsync(string adres, string govde, CancellationToken ct)
+    private async Task<string> SendAsync(string url, string body, CancellationToken ct)
     {
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.PostAsync(
-                adres, new StringContent(govde, Encoding.UTF8, "text/xml"), ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.PostAsync(
+                url, new StringContent(body, Encoding.UTF8, "text/xml"), ct);
 
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"BOA provizyon ucu {(int)yanit.StatusCode} döndü.");
+            var text = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"BOA provizyon ucu {(int)response.StatusCode} döndü.");
 
-            return metin;
+            return text;
         }
         catch (HttpRequestException ex)
         {
@@ -202,17 +202,17 @@ public abstract class BoaConnectorBase(IHttpClientFactory httpClientFactory) : I
     /// 3D dönüşü ya doğrudan form alanlarında ya da URL kodlu XML taşıyan
     /// <c>AuthenticationResponse</c> alanında gelir; ikisi de okunur.
     /// </summary>
-    private static (string OrderId, string? ResponseCode, string? Message, string? Md) DonusuOku(
+    private static (string OrderId, string? ResponseCode, string? Message, string? Md) ReadReturn(
         IReadOnlyDictionary<string, string> form)
     {
-        var alanlar = form.TryGetValue("AuthenticationResponse", out var xml) && !string.IsNullOrWhiteSpace(xml)
-            ? BoaMessages.Oku(Uri.UnescapeDataString(xml))
+        var fields = form.TryGetValue("AuthenticationResponse", out var xml) && !string.IsNullOrWhiteSpace(xml)
+            ? BoaMessages.Parse(Uri.UnescapeDataString(xml))
             : form.ToDictionary(a => a.Key, a => a.Value, StringComparer.OrdinalIgnoreCase);
 
         return (
-            alanlar.GetValueOrDefault("MerchantOrderId") ?? form.GetValueOrDefault("MerchantOrderId", string.Empty),
-            alanlar.GetValueOrDefault("ResponseCode"),
-            alanlar.GetValueOrDefault("ResponseMessage"),
-            alanlar.GetValueOrDefault("MD"));
+            fields.GetValueOrDefault("MerchantOrderId") ?? form.GetValueOrDefault("MerchantOrderId", string.Empty),
+            fields.GetValueOrDefault("ResponseCode"),
+            fields.GetValueOrDefault("ResponseMessage"),
+            fields.GetValueOrDefault("MD"));
     }
 }

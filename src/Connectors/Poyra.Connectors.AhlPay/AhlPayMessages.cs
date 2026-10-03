@@ -10,7 +10,7 @@ public static class AhlPayMessages
     public static string Amount(long amountMinor)
         => amountMinor.ToString(CultureInfo.InvariantCulture);
 
-    public static string Rastgele() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(10));
+    public static string RandomNonce() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(10));
 
     /// <summary>
     /// İstek imzası.
@@ -40,6 +40,6 @@ public static class AhlPayMessages
         _ => UnifiedErrors.CardDeclined,
     };
 
-    public static bool TahsilEdildi(string? txnStatus)
+    public static bool IsCaptured(string? txnStatus)
         => txnStatus is "AUTH" or "SUCCESS" or "SALE";
 }

@@ -51,9 +51,9 @@ public sealed class MokaConnector(IHttpClientFactory httpClientFactory) : IPayme
         DirectPaymentRequest request, string callbackUrl, ConnectorCredentials credentials,
         CancellationToken ct)
     {
-        using var yanit = await GonderAsync(credentials, "PaymentDealer/DoDirectPaymentThreeD", new
+        using var response = await SendAsync(credentials, "PaymentDealer/DoDirectPaymentThreeD", new
         {
-            PaymentDealerAuthentication = Kimlik(credentials),
+            PaymentDealerAuthentication = Authentication(credentials),
             PaymentDealerRequest = new
             {
                 CardHolderFullName = request.Card.HolderName ?? "POYRA MUSTERI",
@@ -77,16 +77,16 @@ public sealed class MokaConnector(IHttpClientFactory httpClientFactory) : IPayme
             },
         }, ct);
 
-        var kok = yanit.RootElement;
-        var veri = kok.TryGetProperty("Data", out var d) ? d : default;
-        var adres = Metin(veri, "Url");
+        var root = response.RootElement;
+        var data = root.TryGetProperty("Data", out var d) ? d : default;
+        var url = Text(data, "Url");
 
-        if (string.IsNullOrWhiteSpace(adres))
+        if (string.IsNullOrWhiteSpace(url))
             throw new ConnectorUnavailableException(
-                $"Moka 3D adresi dönmedi: {Metin(kok, "ResultCode")} {Metin(kok, "ResultMessage")}");
+                $"Moka 3D adresi dönmedi: {Text(root, "ResultCode")} {Text(root, "ResultMessage")}");
 
         // Moka form değil hazır ADRES döner — GET yönlendirmesi (alan yok).
-        return new HostedPaymentForm(adres, new Dictionary<string, string>(), Method: "GET");
+        return new HostedPaymentForm(url, new Dictionary<string, string>(), Method: "GET");
     }
 
     /// <summary>
@@ -95,18 +95,18 @@ public sealed class MokaConnector(IHttpClientFactory httpClientFactory) : IPayme
     /// </summary>
     public HostedCallbackResult ParseAndValidateCallback(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials)
-        => new(false, SiparisNo(form), null, null, null, null,
+        => new(false, ReadOrderId(form), null, null, null, null,
             UnifiedErrors.ProcessingError, form.GetValueOrDefault("resultCode"),
             "Moka dönüşü imzasızdır; tahsilat sunucu sorgusuyla kesinleştirilmelidir.");
 
     public async Task<HostedCallbackResult> CompleteHostedCallbackAsync(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials, CancellationToken ct)
     {
-        var orderId = SiparisNo(form);
+        var orderId = ReadOrderId(form);
 
-        using var yanit = await GonderAsync(credentials, "PaymentDealer/GetDealerPaymentTrxDetailList", new
+        using var response = await SendAsync(credentials, "PaymentDealer/GetDealerPaymentTrxDetailList", new
         {
-            PaymentDealerAuthentication = Kimlik(credentials),
+            PaymentDealerAuthentication = Authentication(credentials),
             PaymentDealerRequest = new
             {
                 OtherTrxCode = orderId,
@@ -114,33 +114,33 @@ public sealed class MokaConnector(IHttpClientFactory httpClientFactory) : IPayme
             },
         }, ct);
 
-        var kok = yanit.RootElement;
-        var ayrinti = IlkOdemeAyrintisi(kok);
+        var root = response.RootElement;
+        var detail = FirstPaymentDetail(root);
 
         // İki alan da tutmalı: PaymentStatus=2 (tamamlandı) VE TrxStatus=1 (onaylandı).
         // Yalnız birine bakmak, iptal edilmiş bir işlemi başarılı saymaya açık bırakırdı.
-        var tamamlandi = Metin(ayrinti, "PaymentStatus") == "2" && Metin(ayrinti, "TrxStatus") == "1";
+        var completed = Text(detail, "PaymentStatus") == "2" && Text(detail, "TrxStatus") == "1";
 
-        if (!tamamlandi)
+        if (!completed)
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                MokaMessages.UnifiedError(Metin(kok, "ResultCode")),
-                Metin(kok, "ResultCode"), Metin(kok, "ResultMessage"));
+                MokaMessages.UnifiedError(Text(root, "ResultCode")),
+                Text(root, "ResultCode"), Text(root, "ResultMessage"));
 
         return new HostedCallbackResult(
             true, orderId,
-            AuthCode: Metin(ayrinti, "AuthCode"),
-            ConnectorTxnId: Metin(ayrinti, "VirtualPosOrderId") ?? form.GetValueOrDefault("trxCode"),
-            MaskedPan: Metin(ayrinti, "CardNumber"),
-            CardBank: Metin(ayrinti, "BankName"),
-            UnifiedErrors.None, Metin(kok, "ResultCode"), null);
+            AuthCode: Text(detail, "AuthCode"),
+            ConnectorTxnId: Text(detail, "VirtualPosOrderId") ?? form.GetValueOrDefault("trxCode"),
+            MaskedPan: Text(detail, "CardNumber"),
+            CardBank: Text(detail, "BankName"),
+            UnifiedErrors.None, Text(root, "ResultCode"), null);
     }
 
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "PaymentDealer/DoVoid", new
+        => OperationAsync(credentials, "PaymentDealer/DoVoid", new
         {
-            PaymentDealerAuthentication = Kimlik(credentials),
+            PaymentDealerAuthentication = Authentication(credentials),
             PaymentDealerRequest = new
             {
                 VirtualPosOrderId = reference.ConnectorTxnId ?? string.Empty,
@@ -152,9 +152,9 @@ public sealed class MokaConnector(IHttpClientFactory httpClientFactory) : IPayme
 
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "PaymentDealer/DoCreateRefundRequest", new
+        => OperationAsync(credentials, "PaymentDealer/DoCreateRefundRequest", new
         {
-            PaymentDealerAuthentication = Kimlik(credentials),
+            PaymentDealerAuthentication = Authentication(credentials),
             PaymentDealerRequest = new
             {
                 VirtualPosOrderId = request.ConnectorTxnId ?? string.Empty,
@@ -165,7 +165,7 @@ public sealed class MokaConnector(IHttpClientFactory httpClientFactory) : IPayme
 
     // ---- İç yardımcılar --------------------------------------------------------
 
-    private static object Kimlik(ConnectorCredentials credentials) => new
+    private static object Authentication(ConnectorCredentials credentials) => new
     {
         DealerCode = credentials.Require("dealer_code"),
         Username = credentials.Require("username"),
@@ -176,48 +176,48 @@ public sealed class MokaConnector(IHttpClientFactory httpClientFactory) : IPayme
             credentials.Require("password")),
     };
 
-    private static string SiparisNo(IReadOnlyDictionary<string, string> form)
+    private static string ReadOrderId(IReadOnlyDictionary<string, string> form)
         => form.GetValueOrDefault("OtherTrxCode")
            ?? form.GetValueOrDefault("otherTrxCode", string.Empty);
 
-    private async Task<ConnectorOperationResult> IslemAsync(
-        ConnectorCredentials credentials, string yol, object govde, string? txnId, CancellationToken ct)
+    private async Task<ConnectorOperationResult> OperationAsync(
+        ConnectorCredentials credentials, string path, object body, string? txnId, CancellationToken ct)
     {
-        using var yanit = await GonderAsync(credentials, yol, govde, ct);
-        var kok = yanit.RootElement;
-        var veri = kok.TryGetProperty("Data", out var d) ? d : default;
+        using var response = await SendAsync(credentials, path, body, ct);
+        var root = response.RootElement;
+        var data = root.TryGetProperty("Data", out var d) ? d : default;
 
-        var basarili = veri.ValueKind == JsonValueKind.Object
-                       && veri.TryGetProperty("IsSuccessful", out var bayrak)
-                       && bayrak.ValueKind == JsonValueKind.True;
+        var succeeded = data.ValueKind == JsonValueKind.Object
+                       && data.TryGetProperty("IsSuccessful", out var flag)
+                       && flag.ValueKind == JsonValueKind.True;
 
-        return basarili
+        return succeeded
             ? ConnectorOperationResult.Ok(txnId)
             : ConnectorOperationResult.Fail(
-                MokaMessages.UnifiedError(Metin(kok, "ResultCode")),
-                Metin(kok, "ResultCode"), Metin(kok, "ResultMessage"));
+                MokaMessages.UnifiedError(Text(root, "ResultCode")),
+                Text(root, "ResultCode"), Text(root, "ResultMessage"));
     }
 
-    private async Task<JsonDocument> GonderAsync(
-        ConnectorCredentials credentials, string yol, object govde, CancellationToken ct)
+    private async Task<JsonDocument> SendAsync(
+        ConnectorCredentials credentials, string path, object body, CancellationToken ct)
     {
-        var adres = $"{credentials.Require("gateway_base").TrimEnd('/')}/{yol}";
+        var url = $"{credentials.Require("gateway_base").TrimEnd('/')}/{path}";
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.PostAsync(adres, JsonContent.Create(govde), ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.PostAsync(url, JsonContent.Create(body), ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"Moka {yol} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"Moka {path} → {(int)response.StatusCode}.");
 
-            return JsonDocument.Parse(metin);
+            return JsonDocument.Parse(text);
         }
         catch (HttpRequestException ex)
         {
             // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"Moka {yol} ucuna ulaşılamadı.", ex);
+            throw new ConnectorUnavailableException($"Moka {path} ucuna ulaşılamadı.", ex);
         }
         catch (JsonException ex)
         {
@@ -226,25 +226,25 @@ public sealed class MokaConnector(IHttpClientFactory httpClientFactory) : IPayme
     }
 
     /// <summary>Sorgu yanıtı liste döner; aradığımız tek işlem listedeki ilkidir.</summary>
-    private static JsonElement IlkOdemeAyrintisi(JsonElement kok)
+    private static JsonElement FirstPaymentDetail(JsonElement root)
     {
-        if (!kok.TryGetProperty("Data", out var veri)) return default;
+        if (!root.TryGetProperty("Data", out var data)) return default;
 
-        if (veri.TryGetProperty("PaymentDetail", out var tekil) && tekil.ValueKind == JsonValueKind.Object)
-            return tekil;
+        if (data.TryGetProperty("PaymentDetail", out var single) && single.ValueKind == JsonValueKind.Object)
+            return single;
 
-        if (veri.ValueKind == JsonValueKind.Array && veri.GetArrayLength() > 0)
-            return veri[0];
+        if (data.ValueKind == JsonValueKind.Array && data.GetArrayLength() > 0)
+            return data[0];
 
         return default;
     }
 
-    private static string? Metin(JsonElement element, string ad)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(ad, out var deger)
-            ? deger.ValueKind switch
+    private static string? Text(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
             {
-                JsonValueKind.String => deger.GetString(),
-                JsonValueKind.Number => deger.ToString(),
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
                 _ => null,
             }
             : null;

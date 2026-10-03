@@ -177,7 +177,7 @@ public sealed class BoaIptalIadeTests
     [Fact]
     public void Iptal_mesaji_belgelenen_alanlari_tasimali()
     {
-        var xml = BoaMessages.IptalXml("VPosMessageContract", "1", "936", "APIUSER",
+        var xml = BoaMessages.CancelXml("VPosMessageContract", "1", "936", "APIUSER",
             "hashli", "1061162073", "12345", "970", "IMZA");
 
         xml.ShouldContain("<VPosMessageContract");
@@ -192,7 +192,7 @@ public sealed class BoaIptalIadeTests
     public void Kismi_iade_mesaji_tutari_IKI_alanda_tasimali()
     {
         // Banka hem Amount hem DisplayAmount bekliyor; birini atlamak isteği düşürür.
-        var xml = BoaMessages.KismiIadeXml("VPosMessageContract", "1", "11111", "APIUSER",
+        var xml = BoaMessages.PartialRefundXml("VPosMessageContract", "1", "11111", "APIUSER",
             "hashli", "1771489024", "15184", "500", "IMZA");
 
         xml.ShouldContain("<Amount>500</Amount>");
@@ -204,7 +204,7 @@ public sealed class BoaIptalIadeTests
     public void Mesajlar_XML_kacirmasi_yapmali()
     {
         // Kullanıcı adında bir '&' kaçırılmazsa gövde bozulur ve banka isteği reddeder.
-        BoaMessages.IptalXml("VPosMessageContract", "1", "9", "API&USER", "h", "o", "1", "0", "IMZA")
+        BoaMessages.CancelXml("VPosMessageContract", "1", "9", "API&USER", "h", "o", "1", "0", "IMZA")
             .ShouldContain("API&amp;USER");
     }
 
@@ -212,9 +212,9 @@ public sealed class BoaIptalIadeTests
     public void Kok_eleman_bankaya_gore_degismeli()
     {
         // Kuveyt Türk ve Vakıf Katılım aynı ailede ama XML kök elemanları farklı.
-        BoaMessages.IptalXml("KuveytTurkVPosMessage", "1", "9", "u", "h", "o", "1", "0", "I")
+        BoaMessages.CancelXml("KuveytTurkVPosMessage", "1", "9", "u", "h", "o", "1", "0", "I")
             .ShouldContain("<KuveytTurkVPosMessage");
-        BoaMessages.IptalXml("VPosMessageContract", "1", "9", "u", "h", "o", "1", "0", "I")
+        BoaMessages.CancelXml("VPosMessageContract", "1", "9", "u", "h", "o", "1", "0", "I")
             .ShouldContain("<VPosMessageContract");
     }
 }

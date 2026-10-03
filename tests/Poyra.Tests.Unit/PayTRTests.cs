@@ -72,10 +72,10 @@ public sealed class PayTRTests
     public void Basari_success_DIZESIDIR_kod_degil()
     {
         // Diğer sağlayıcıların çoğunda onay "00" ya da "1"dir; burada dize.
-        PayTRMessages.Onaylandi("success").ShouldBeTrue();
-        PayTRMessages.Onaylandi("failed").ShouldBeFalse();
-        PayTRMessages.Onaylandi("00").ShouldBeFalse();
-        PayTRMessages.Onaylandi(null).ShouldBeFalse();
+        PayTRMessages.IsApproved("success").ShouldBeTrue();
+        PayTRMessages.IsApproved("failed").ShouldBeFalse();
+        PayTRMessages.IsApproved("00").ShouldBeFalse();
+        PayTRMessages.IsApproved(null).ShouldBeFalse();
     }
 
     [Fact]

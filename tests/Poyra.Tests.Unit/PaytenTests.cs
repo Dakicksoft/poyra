@@ -24,7 +24,7 @@ public sealed class PaytenImzaTests
 
     [Fact]
     public void Dogru_imza_kabul_edilmeli()
-        => PaytenMessages.ImzaGecerli(
+        => PaytenMessages.IsSignatureValid(
             Imza("att_1", "m1", "tok", "00", "r1"), "att_1", "m1", "tok", "00", "r1", Sir)
             .ShouldBeTrue();
 
@@ -35,8 +35,8 @@ public sealed class PaytenImzaTests
         // bilmeyen hiçbirini üretemez. Sertifikasyonda tek biçime sabitlenecek.
         var ozet = SHA512.HashData(Encoding.UTF8.GetBytes(string.Join('|', "att_1", "m1", "tok", "00", "r1", Sir)));
 
-        PaytenMessages.ImzaGecerli(Convert.ToHexStringLower(ozet), "att_1", "m1", "tok", "00", "r1", Sir).ShouldBeTrue();
-        PaytenMessages.ImzaGecerli(Convert.ToBase64String(ozet), "att_1", "m1", "tok", "00", "r1", Sir).ShouldBeTrue();
+        PaytenMessages.IsSignatureValid(Convert.ToHexStringLower(ozet), "att_1", "m1", "tok", "00", "r1", Sir).ShouldBeTrue();
+        PaytenMessages.IsSignatureValid(Convert.ToBase64String(ozet), "att_1", "m1", "tok", "00", "r1", Sir).ShouldBeTrue();
     }
 
     [Theory]
@@ -52,12 +52,12 @@ public sealed class PaytenImzaTests
         // kullanabilirdi — ör. tutarı ya da sonuç kodunu.
         var gecerli = Imza("att_1", "m1", "tok", "00", "r1");
 
-        PaytenMessages.ImzaGecerli(gecerli, siparis, musteri, oturum, kod, rastgele, Sir).ShouldBeFalse();
+        PaytenMessages.IsSignatureValid(gecerli, siparis, musteri, oturum, kod, rastgele, Sir).ShouldBeFalse();
     }
 
     [Fact]
     public void Yanlis_sir_imzayi_dusurmeli()
-        => PaytenMessages.ImzaGecerli(
+        => PaytenMessages.IsSignatureValid(
             Imza("att_1", "m1", "tok", "00", "r1"), "att_1", "m1", "tok", "00", "r1", "baska-sir")
             .ShouldBeFalse();
 
@@ -66,7 +66,7 @@ public sealed class PaytenImzaTests
     [InlineData("")]
     [InlineData("bozuk")]
     public void Imzasiz_ya_da_bozuk_deger_reddedilmeli(string? imza)
-        => PaytenMessages.ImzaGecerli(imza, "att_1", "m1", "tok", "00", "r1", Sir).ShouldBeFalse();
+        => PaytenMessages.IsSignatureValid(imza, "att_1", "m1", "tok", "00", "r1", Sir).ShouldBeFalse();
 
     [Theory]
     [InlineData(14_990, "149.90")]

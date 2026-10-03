@@ -175,7 +175,7 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
         var root = response.RootElement;
 
         if (Text(root, "result") != "RedirectFormCreated"
-            || ConnectorHtml.FormuCikar(Text(root, "redirectForm") ?? string.Empty) is not { } form)
+            || ConnectorHtml.ExtractForm(Text(root, "redirectForm") ?? string.Empty) is not { } form)
             throw new ConnectorUnavailableException(
                 $"Lidio 3D formu dönmedi: {Text(root, "result")} {Text(root, "resultDetail")} "
                 + Text(root, "resultMessage"));

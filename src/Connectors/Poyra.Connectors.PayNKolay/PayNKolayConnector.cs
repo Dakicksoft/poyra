@@ -42,17 +42,17 @@ public sealed class PayNKolayConnector(IHttpClientFactory httpClientFactory) : I
         HostedPaymentRequest request, ConnectorCredentials credentials, CancellationToken ct)
     {
         var sx = credentials.Require("sx");
-        var tutar = PayNKolayMessages.Amount(request.AmountMinor);
-        var rastgele = PayNKolayMessages.Rastgele();
+        var amount = PayNKolayMessages.Amount(request.AmountMinor);
+        var random = PayNKolayMessages.RandomNonce();
 
         var fields = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["sx"] = sx,
             ["clientRefCode"] = request.OrderId,
-            ["amount"] = tutar,
+            ["amount"] = amount,
             ["successUrl"] = request.CallbackUrl,
             ["failUrl"] = request.CallbackUrl,
-            ["rnd"] = rastgele,
+            ["rnd"] = random,
             ["customerKey"] = string.Empty, // kart saklama kullanılmıyor
             ["installmentNo"] = Math.Max(1, request.Installments).ToString(),
             ["transactionType"] = "sales",
@@ -61,12 +61,12 @@ public sealed class PayNKolayConnector(IHttpClientFactory httpClientFactory) : I
             ["environment"] = "PROD",
             ["cardHolderIP"] = request.CustomerIp ?? "0.0.0.0",
             ["hashDatav2"] = PayNKolayMessages.RequestHash(
-                sx, request.OrderId, tutar, request.CallbackUrl, request.CallbackUrl,
-                rastgele, string.Empty, credentials.Require("secret_key")),
+                sx, request.OrderId, amount, request.CallbackUrl, request.CallbackUrl,
+                random, string.Empty, credentials.Require("secret_key")),
         };
 
-        var adres = $"{credentials.Require("gateway_base").TrimEnd('/')}/Vpos/v1/Payment";
-        return Task.FromResult(new HostedPaymentForm(adres, fields));
+        var url = $"{credentials.Require("gateway_base").TrimEnd('/')}/Vpos/v1/Payment";
+        return Task.FromResult(new HostedPaymentForm(url, fields));
     }
 
     /// <summary>
@@ -78,13 +78,13 @@ public sealed class PayNKolayConnector(IHttpClientFactory httpClientFactory) : I
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials)
     {
         var orderId = form.GetValueOrDefault("CLIENT_REFERENCE_CODE", string.Empty);
-        var kod = form.GetValueOrDefault("RESPONSE_CODE");
+        var code = form.GetValueOrDefault("RESPONSE_CODE");
 
-        var beklenen = PayNKolayMessages.ResponseHash(
+        var expected = PayNKolayMessages.ResponseHash(
             credentials.Require("sx"),
             form.GetValueOrDefault("REFERENCE_CODE"),
             form.GetValueOrDefault("AUTH_CODE"),
-            kod,
+            code,
             form.GetValueOrDefault("USE_3D"),
             form.GetValueOrDefault("RND"),
             form.GetValueOrDefault("INSTALLMENT"),
@@ -92,16 +92,16 @@ public sealed class PayNKolayConnector(IHttpClientFactory httpClientFactory) : I
             form.GetValueOrDefault("CURRENCY_CODE"),
             credentials.Require("secret_key"));
 
-        if (!PayNKolayMessages.ImzaGecerli(form.GetValueOrDefault("hashDataV2"), beklenen))
+        if (!PayNKolayMessages.IsSignatureValid(form.GetValueOrDefault("hashDataV2"), expected))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                UnifiedErrors.SignatureInvalid, kod,
+                UnifiedErrors.SignatureInvalid, code,
                 "PayNKolay dönüş imzası (hashDataV2) doğrulanamadı.");
 
-        if (!PayNKolayMessages.Onaylandi(kod))
+        if (!PayNKolayMessages.IsApproved(code))
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                PayNKolayMessages.UnifiedError(kod), kod,
+                PayNKolayMessages.UnifiedError(code), code,
                 form.GetValueOrDefault("RESPONSE_DATA") ?? form.GetValueOrDefault("ERROR_MESSAGE"));
 
         return new HostedCallbackResult(
@@ -110,52 +110,52 @@ public sealed class PayNKolayConnector(IHttpClientFactory httpClientFactory) : I
             ConnectorTxnId: form.GetValueOrDefault("REFERENCE_CODE"),
             MaskedPan: form.GetValueOrDefault("MASKED_PAN"),
             CardBank: form.GetValueOrDefault("BANK_NAME"),
-            UnifiedErrors.None, kod, null);
+            UnifiedErrors.None, code, null);
     }
 
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IptalIadeAsync(credentials, "cancel", reference.ConnectorTxnId, string.Empty, ct);
+        => CancelOrRefundAsync(credentials, "cancel", reference.ConnectorTxnId, string.Empty, ct);
 
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IptalIadeAsync(credentials, "refund", request.ConnectorTxnId,
+        => CancelOrRefundAsync(credentials, "refund", request.ConnectorTxnId,
             PayNKolayMessages.Amount(request.AmountMinor), ct);
 
-    private async Task<ConnectorOperationResult> IptalIadeAsync(
-        ConnectorCredentials credentials, string tur, string? referans, string tutar, CancellationToken ct)
+    private async Task<ConnectorOperationResult> CancelOrRefundAsync(
+        ConnectorCredentials credentials, string kind, string? reference, string amount, CancellationToken ct)
     {
-        var alanlar = new Dictionary<string, string>(StringComparer.Ordinal)
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["sx"] = credentials.Require("sx"),
-            ["referenceCode"] = referans ?? string.Empty,
-            ["type"] = tur,
-            ["amount"] = tutar,
+            ["referenceCode"] = reference ?? string.Empty,
+            ["type"] = kind,
+            ["amount"] = amount,
             ["trxDate"] = string.Empty,
         };
 
-        var adres = $"{credentials.Require("gateway_base").TrimEnd('/')}/Vpos/v1/CancelRefundPayment";
+        var url = $"{credentials.Require("gateway_base").TrimEnd('/')}/Vpos/v1/CancelRefundPayment";
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.PostAsync(adres, new FormUrlEncodedContent(alanlar), ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.PostAsync(url, new FormUrlEncodedContent(fields), ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"PayNKolay {tur} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"PayNKolay {kind} → {(int)response.StatusCode}.");
 
             // Yanıt "RESPONSE_CODE=2" içeriyorsa onaylandı; biçim sağlayıcıya göre
             // değişebildiği için ham metinde aranır (TODO(cert): şema sabitlenecek).
-            return metin.Contains("\"RESPONSE_CODE\":\"2\"", StringComparison.Ordinal)
-                   || metin.Contains("RESPONSE_CODE=2", StringComparison.Ordinal)
-                ? ConnectorOperationResult.Ok(referans)
-                : ConnectorOperationResult.Fail(UnifiedErrors.ProcessingError, null, metin[..Math.Min(200, metin.Length)]);
+            return text.Contains("\"RESPONSE_CODE\":\"2\"", StringComparison.Ordinal)
+                   || text.Contains("RESPONSE_CODE=2", StringComparison.Ordinal)
+                ? ConnectorOperationResult.Ok(reference)
+                : ConnectorOperationResult.Fail(UnifiedErrors.ProcessingError, null, text[..Math.Min(200, text.Length)]);
         }
         catch (HttpRequestException ex)
         {
             // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"PayNKolay {tur} ucuna ulaşılamadı.", ex);
+            throw new ConnectorUnavailableException($"PayNKolay {kind} ucuna ulaşılamadı.", ex);
         }
     }
 }

@@ -61,7 +61,7 @@ public sealed class CraftgateTests : IAsyncLifetime
 
     [Fact]
     public void Imza_belgelenen_sirayi_izlemeli()
-        => CraftgateMessages.Imza("https://api.test", "/payment/v1/x", ApiKey, SecretKey, "rnd1", "{}")
+        => CraftgateMessages.Signature("https://api.test", "/payment/v1/x", ApiKey, SecretKey, "rnd1", "{}")
             .ShouldBe(Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(
                 "https://api.test" + "/payment/v1/x" + ApiKey + SecretKey + "rnd1" + "{}"))));
 
@@ -71,16 +71,16 @@ public sealed class CraftgateTests : IAsyncLifetime
         // Sandbox'ta üretilen imza canlıda geçmez. Bunu bilmeden adresi kimlik
         // bilgilerinden alıp imzayı sabit bir adresle kurmak, tüm isteklerin
         // reddedilmesiyle sonuçlanırdı.
-        var sandbox = CraftgateMessages.Imza("https://sandbox-api.test", "/y", ApiKey, SecretKey, "r", "{}");
-        var canli = CraftgateMessages.Imza("https://api.test", "/y", ApiKey, SecretKey, "r", "{}");
+        var sandbox = CraftgateMessages.Signature("https://sandbox-api.test", "/y", ApiKey, SecretKey, "r", "{}");
+        var canli = CraftgateMessages.Signature("https://api.test", "/y", ApiKey, SecretKey, "r", "{}");
 
         sandbox.ShouldNotBe(canli);
     }
 
     [Fact]
     public void Imza_YOLU_da_kapsamali()
-        => CraftgateMessages.Imza("https://api.test", "/payment/v1/refunds", ApiKey, SecretKey, "r", "{}")
-            .ShouldNotBe(CraftgateMessages.Imza("https://api.test", "/payment/v1/cards", ApiKey, SecretKey, "r", "{}"));
+        => CraftgateMessages.Signature("https://api.test", "/payment/v1/refunds", ApiKey, SecretKey, "r", "{}")
+            .ShouldNotBe(CraftgateMessages.Signature("https://api.test", "/payment/v1/cards", ApiKey, SecretKey, "r", "{}"));
 
     // ---- Ortak Ödeme Sayfası ---------------------------------------------------
 

@@ -58,7 +58,7 @@ public sealed class ParamPosTests
     {
         // Çoğu protokolde "0" başarıdır; burada değil. Karıştırmak başarısız işlemi
         // tahsilat saymak olurdu.
-        ParamPosMessages.Basarili(sonuc).ShouldBe(beklenen);
+        ParamPosMessages.Succeeded(sonuc).ShouldBe(beklenen);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class ParamPosTests
     {
         // Açıklamada bir '&' ya da '<' varsa kaçırılmazsa gövde bozulur ve istek
         // anlaşılmaz bir hatayla reddedilir.
-        var zarf = ParamPosMessages.Zarf("TP_WMD_UCD", "G1",
+        var zarf = ParamPosMessages.Envelope("TP_WMD_UCD", "G1",
             new Dictionary<string, string> { ["Siparis_Aciklama"] = "Kahve & Çay <özel>" },
             "C1", "u1", "p1");
 
@@ -77,7 +77,7 @@ public sealed class ParamPosTests
     [Fact]
     public void Zarf_islem_adini_ve_kimligi_tasimali()
     {
-        var zarf = ParamPosMessages.Zarf("TP_WMD_Pay", "G1",
+        var zarf = ParamPosMessages.Envelope("TP_WMD_Pay", "G1",
             new Dictionary<string, string> { ["Siparis_ID"] = "att_1" }, "C1", "u1", "p1");
 
         zarf.ShouldContain("<TP_WMD_Pay xmlns=\"https://turkpos.com.tr/\">");
@@ -91,9 +91,9 @@ public sealed class ParamPosTests
     {
         // Sağlayıcı XML yerine HTML hata sayfası döndürebilir; susup boş dönmek,
         // yanlış ayrıştırılmış bir "başarılı" üretmekten iyidir.
-        ParamPosMessages.Oku("<html>hata</html>").ShouldNotContainKey("Sonuc");
-        ParamPosMessages.Oku("bozuk").ShouldBeEmpty();
-        ParamPosMessages.Oku("").ShouldBeEmpty();
+        ParamPosMessages.Parse("<html>hata</html>").ShouldNotContainKey("Sonuc");
+        ParamPosMessages.Parse("bozuk").ShouldBeEmpty();
+        ParamPosMessages.Parse("").ShouldBeEmpty();
     }
 
     [Fact]

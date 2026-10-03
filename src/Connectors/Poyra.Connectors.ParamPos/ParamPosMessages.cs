@@ -19,52 +19,52 @@ public static class ParamPosMessages
     /// <c>CLIENT_CODE + GUID + taksit + tutar + toplamTutar + siparisNo</c> → SHA1 → Base64.
     /// </summary>
     public static string RequestHash(
-        string clientCode, string guid, string taksit, string tutar, string toplamTutar, string siparisNo)
+        string clientCode, string guid, string installment, string amount, string totalAmount, string orderNumber)
         => Convert.ToBase64String(SHA1.HashData(Encoding.UTF8.GetBytes(
-            string.Concat(clientCode, guid, taksit, tutar, toplamTutar, siparisNo))));
+            string.Concat(clientCode, guid, installment, amount, totalAmount, orderNumber))));
 
-    public static bool Basarili(string? sonuc)
-        => int.TryParse(sonuc, NumberStyles.Integer, CultureInfo.InvariantCulture, out var deger) && deger > 0;
+    public static bool Succeeded(string? result)
+        => int.TryParse(result, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && value > 0;
 
 
-    public static string Zarf(string islem, string guid, IReadOnlyDictionary<string, string> alanlar,
+    public static string Envelope(string operation, string guid, IReadOnlyDictionary<string, string> fields,
         string clientCode, string clientUsername, string clientPassword)
     {
-        var govde = new StringBuilder();
-        foreach (var (ad, deger) in alanlar)
-            govde.Append(CultureInfo.InvariantCulture, $"      <{ad}>{Kacir(deger)}</{ad}>\n");
+        var body = new StringBuilder();
+        foreach (var (name, value) in fields)
+            body.Append(CultureInfo.InvariantCulture, $"      <{name}>{EscapeXml(value)}</{name}>\n");
 
         return $"""
             <?xml version="1.0" encoding="utf-8"?>
             <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
               <soap:Body>
-                <{islem} xmlns="{Ns}">
+                <{operation} xmlns="{Ns}">
                   <G>
-                    <CLIENT_CODE>{Kacir(clientCode)}</CLIENT_CODE>
-                    <CLIENT_USERNAME>{Kacir(clientUsername)}</CLIENT_USERNAME>
-                    <CLIENT_PASSWORD>{Kacir(clientPassword)}</CLIENT_PASSWORD>
+                    <CLIENT_CODE>{EscapeXml(clientCode)}</CLIENT_CODE>
+                    <CLIENT_USERNAME>{EscapeXml(clientUsername)}</CLIENT_USERNAME>
+                    <CLIENT_PASSWORD>{EscapeXml(clientPassword)}</CLIENT_PASSWORD>
                   </G>
-                  <GUID>{Kacir(guid)}</GUID>
-            {govde}    </{islem}>
+                  <GUID>{EscapeXml(guid)}</GUID>
+            {body}    </{operation}>
               </soap:Body>
             </soap:Envelope>
             """;
     }
 
-    public static IReadOnlyDictionary<string, string> Oku(string xml)
+    public static IReadOnlyDictionary<string, string> Parse(string xml)
     {
-        var sonuc = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(xml)) return sonuc;
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(xml)) return result;
 
         try
         {
-            var kok = XDocument.Parse(xml).Root;
-            if (kok is null) return sonuc;
+            var root = XDocument.Parse(xml).Root;
+            if (root is null) return result;
 
-            foreach (var dugum in kok.Descendants())
+            foreach (var node in root.Descendants())
             {
-                if (dugum.HasElements) continue;
-                sonuc.TryAdd(dugum.Name.LocalName, dugum.Value.Trim());
+                if (node.HasElements) continue;
+                result.TryAdd(node.Name.LocalName, node.Value.Trim());
             }
         }
         catch (System.Xml.XmlException)
@@ -73,10 +73,10 @@ public static class ParamPosMessages
             // yanlış ayrıştırılmış bir "başarılı" üretmekten iyidir.
         }
 
-        return sonuc;
+        return result;
     }
 
-    public static string UnifiedError(string? sonuc, string? mdStatus) => (sonuc, mdStatus) switch
+    public static string UnifiedError(string? result, string? mdStatus) => (result, mdStatus) switch
     {
         (_, "0") => UnifiedErrors.ThreeDsFailed,
         (_, "2" or "3" or "4") => UnifiedErrors.ThreeDsUnavailable,
@@ -86,5 +86,5 @@ public static class ParamPosMessages
         _ => UnifiedErrors.CardDeclined,
     };
 
-    private static string Kacir(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
+    private static string EscapeXml(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
 }

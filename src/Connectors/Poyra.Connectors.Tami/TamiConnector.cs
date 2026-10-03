@@ -52,7 +52,7 @@ public sealed class TamiConnector(IHttpClientFactory httpClientFactory) : IPayme
         DirectPaymentRequest request, string callbackUrl, ConnectorCredentials credentials,
         CancellationToken ct)
     {
-        var govde = new Dictionary<string, object?>
+        var body = new Dictionary<string, object?>
         {
             ["orderId"] = request.OrderId,
             ["amount"] = TamiMessages.Amount(request.AmountMinor),
@@ -79,28 +79,28 @@ public sealed class TamiConnector(IHttpClientFactory httpClientFactory) : IPayme
             },
         };
 
-        using var yanit = await GonderAsync(credentials, "payment/auth", govde, ct);
-        var kok = yanit.RootElement;
+        using var response = await SendAsync(credentials, "payment/auth", body, ct);
+        var root = response.RootElement;
 
-        var kodlu = Metin(kok, "threeDSHtmlContent");
-        if (string.IsNullOrWhiteSpace(kodlu))
+        var encoded = Text(root, "threeDSHtmlContent");
+        if (string.IsNullOrWhiteSpace(encoded))
             throw new ConnectorUnavailableException(
-                $"Tami 3D içeriği dönmedi: {Metin(kok, "errorCode")} {Metin(kok, "errorMessage")}");
+                $"Tami 3D içeriği dönmedi: {Text(root, "errorCode")} {Text(root, "errorMessage")}");
 
         (string, Dictionary<string, string>)? form;
         try
         {
-            form = ConnectorHtml.FormuCikar(Encoding.UTF8.GetString(Convert.FromBase64String(kodlu)));
+            form = ConnectorHtml.ExtractForm(Encoding.UTF8.GetString(Convert.FromBase64String(encoded)));
         }
         catch (FormatException ex)
         {
             throw new ConnectorUnavailableException("Tami 3D içeriği base64 değil.", ex);
         }
 
-        if (form is not { } cikan)
+        if (form is not { } extracted)
             throw new ConnectorUnavailableException("Tami 3D içeriğinde beklenen form yok.");
 
-        return new HostedPaymentForm(cikan.Item1, cikan.Item2);
+        return new HostedPaymentForm(extracted.Item1, extracted.Item2);
     }
 
     /// <summary>
@@ -127,104 +127,104 @@ public sealed class TamiConnector(IHttpClientFactory httpClientFactory) : IPayme
                 TamiMessages.UnifiedError(null, mdStatus), mdStatus,
                 "3D kimlik doğrulaması başarısız.");
 
-        using var sorgu = await GonderAsync(credentials, "payment/query", new Dictionary<string, object?>
+        using var query = await SendAsync(credentials, "payment/query", new Dictionary<string, object?>
         {
             ["orderId"] = orderId,
             ["isTransactionDetail"] = "true",
         }, ct);
 
-        var kok = sorgu.RootElement;
-        var durum = Metin(kok, "paymentStatus");
+        var root = query.RootElement;
+        var status = Text(root, "paymentStatus");
 
         // İki koşul birden: işlem başarılı VE sipariş yetkilendirilmiş olmalı.
-        var basarili = kok.TryGetProperty("success", out var bayrak)
-                       && bayrak.ValueKind == JsonValueKind.True
-                       && durum == "SUCCESS";
+        var succeeded = root.TryGetProperty("success", out var flag)
+                       && flag.ValueKind == JsonValueKind.True
+                       && status == "SUCCESS";
 
-        if (!basarili)
+        if (!succeeded)
             return new HostedCallbackResult(
                 false, orderId, null, null, null, null,
-                TamiMessages.UnifiedError(durum, mdStatus), durum, Metin(kok, "errorMessage"));
+                TamiMessages.UnifiedError(status, mdStatus), status, Text(root, "errorMessage"));
 
         return new HostedCallbackResult(
             true, orderId,
-            AuthCode: Metin(kok, "authCode"),
-            ConnectorTxnId: Metin(kok, "transactionId") ?? orderId,
+            AuthCode: Text(root, "authCode"),
+            ConnectorTxnId: Text(root, "transactionId") ?? orderId,
             MaskedPan: form.GetValueOrDefault("maskedNumber"),
             CardBank: form.GetValueOrDefault("cardBrand"),
-            UnifiedErrors.None, durum, null);
+            UnifiedErrors.None, status, null);
     }
 
     public Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "payment/reverse", new Dictionary<string, object?>
+        => OperationAsync(credentials, "payment/reverse", new Dictionary<string, object?>
         {
             ["orderId"] = reference.OrderId,
         }, reference.ConnectorTxnId, ct);
 
     public Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => IslemAsync(credentials, "payment/refund", new Dictionary<string, object?>
+        => OperationAsync(credentials, "payment/refund", new Dictionary<string, object?>
         {
             ["orderId"] = request.OrderId,
             ["amount"] = TamiMessages.Amount(request.AmountMinor),
         }, request.ConnectorTxnId, ct);
 
 
-    private async Task<ConnectorOperationResult> IslemAsync(
-        ConnectorCredentials credentials, string yol, Dictionary<string, object?> govde,
+    private async Task<ConnectorOperationResult> OperationAsync(
+        ConnectorCredentials credentials, string path, Dictionary<string, object?> body,
         string? txnId, CancellationToken ct)
     {
-        using var yanit = await GonderAsync(credentials, yol, govde, ct);
-        var basarili = yanit.RootElement.TryGetProperty("success", out var bayrak)
-                       && bayrak.ValueKind == JsonValueKind.True;
+        using var response = await SendAsync(credentials, path, body, ct);
+        var succeeded = response.RootElement.TryGetProperty("success", out var flag)
+                       && flag.ValueKind == JsonValueKind.True;
 
-        return basarili
+        return succeeded
             ? ConnectorOperationResult.Ok(txnId)
             : ConnectorOperationResult.Fail(
                 UnifiedErrors.ProcessingError,
-                Metin(yanit.RootElement, "errorCode"),
-                Metin(yanit.RootElement, "errorMessage"));
+                Text(response.RootElement, "errorCode"),
+                Text(response.RootElement, "errorMessage"));
     }
 
-    private async Task<JsonDocument> GonderAsync(
-        ConnectorCredentials credentials, string yol, Dictionary<string, object?> govde,
+    private async Task<JsonDocument> SendAsync(
+        ConnectorCredentials credentials, string path, Dictionary<string, object?> body,
         CancellationToken ct)
     {
         // İmza gövdenin TAMAMINI kapsar ve securityHash'in kendisi hesaba katılmaz —
         // bu yüzden önce imzasız gövde serileştirilir, sonra alan eklenir.
-        var imzasiz = JsonSerializer.Serialize(govde);
-        var imza = TamiMessages.SecurityHash(
-            imzasiz, credentials.Require("jwk_kid"), credentials.Require("jwk_key"));
+        var unsigned = JsonSerializer.Serialize(body);
+        var signature = TamiMessages.SecurityHash(
+            unsigned, credentials.Require("jwk_kid"), credentials.Require("jwk_key"));
 
-        govde["securityHash"] = imza;
-        var json = JsonSerializer.Serialize(govde);
+        body["securityHash"] = signature;
+        var json = JsonSerializer.Serialize(body);
 
-        using var istek = new HttpRequestMessage(
-            HttpMethod.Post, $"{credentials.Require("gateway_base").TrimEnd('/')}/{yol}")
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"{credentials.Require("gateway_base").TrimEnd('/')}/{path}")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
-        istek.Headers.TryAddWithoutValidation("PG-Api-Version", "v3");
-        istek.Headers.TryAddWithoutValidation("PG-Auth-Token",
-            $"{credentials.Require("merchant_number")}:{credentials.Require("terminal_number")}:{imza}");
-        istek.Headers.TryAddWithoutValidation("correlationId", Guid.NewGuid().ToString("N"));
+        request.Headers.TryAddWithoutValidation("PG-Api-Version", "v3");
+        request.Headers.TryAddWithoutValidation("PG-Auth-Token",
+            $"{credentials.Require("merchant_number")}:{credentials.Require("terminal_number")}:{signature}");
+        request.Headers.TryAddWithoutValidation("correlationId", Guid.NewGuid().ToString("N"));
 
         try
         {
-            var istemci = httpClientFactory.CreateClient(HttpClientName);
-            using var yanit = await istemci.SendAsync(istek, ct);
-            var metin = await yanit.Content.ReadAsStringAsync(ct);
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.SendAsync(request, ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
 
-            if (!yanit.IsSuccessStatusCode)
-                throw new ConnectorUnavailableException($"Tami {yol} → {(int)yanit.StatusCode}.");
+            if (!response.IsSuccessStatusCode)
+                throw new ConnectorUnavailableException($"Tami {path} → {(int)response.StatusCode}.");
 
-            return JsonDocument.Parse(metin);
+            return JsonDocument.Parse(text);
         }
         catch (HttpRequestException ex)
         {
             // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"Tami {yol} ucuna ulaşılamadı.", ex);
+            throw new ConnectorUnavailableException($"Tami {path} ucuna ulaşılamadı.", ex);
         }
         catch (JsonException ex)
         {
@@ -232,12 +232,12 @@ public sealed class TamiConnector(IHttpClientFactory httpClientFactory) : IPayme
         }
     }
 
-    private static string? Metin(JsonElement element, string ad)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(ad, out var deger)
-            ? deger.ValueKind switch
+    private static string? Text(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
             {
-                JsonValueKind.String => deger.GetString(),
-                JsonValueKind.Number => deger.ToString(),
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
                 _ => null,
             }
             : null;
