@@ -119,7 +119,7 @@ public sealed class AdyenConnectorTests : IAsyncLifetime
             new Dictionary<string, string>(), _credentials, default);
 
         result.Success.ShouldBeFalse();
-        result.RawMessage?.ShouldContain("bağlantı kimliği");
+        result.RawMessage.ShouldNotBeNull().ShouldContain("bağlantı kimliği");
     }
 
     // ---- Tutar birimi -----------------------------------------------------------
@@ -230,11 +230,11 @@ public sealed class AdyenConnectorTests : IAsyncLifetime
     {
         (await _connector.RefundAsync(
             new ConnectorRefundRequest("att_x", null, 100, "EUR"), _credentials, CancellationToken.None))
-            .RawMessage?.ShouldContain("pspReference");
+            .RawMessage.ShouldNotBeNull().ShouldContain("pspReference");
 
         (await _connector.VoidAsync(
             new ConnectorReference("att_x", null), _credentials, CancellationToken.None))
-            .RawMessage?.ShouldContain("pspReference");
+            .RawMessage.ShouldNotBeNull().ShouldContain("pspReference");
     }
 
     [Fact]
@@ -259,14 +259,14 @@ public sealed class AdyenConnectorTests : IAsyncLifetime
         var probe = await _connector.ProbeAsync(_credentials, default);
 
         probe!.Healthy.ShouldBeFalse();
-        probe.Detail?.ShouldContain("901");
+        probe.Detail.ShouldNotBeNull().ShouldContain("901");
     }
 
     [Fact]
     public void Katalog_taksit_desteklemedigini_soylemeli()
     {
         _connector.Descriptor.SupportsInstallments.ShouldBeFalse();
-        _connector.Descriptor.Notes?.ShouldContain("taksidi YOKTUR");
+        _connector.Descriptor.Notes.ShouldNotBeNull().ShouldContain("taksidi YOKTUR");
         // Canlıda adres hesaba özeldir — sabit yazmak canlıya çıkışta patlardı
         _connector.Descriptor.CredentialFields.ShouldContain(f => f.Name == "gateway_base");
     }

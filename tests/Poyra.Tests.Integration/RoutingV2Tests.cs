@@ -142,9 +142,9 @@ public sealed class RoutingV2Tests : IDisposable
 
         var routing = await RoutingResultAsync(tenant.TenantId, payment.Id);
         routing.GetProperty("strategy").GetString().ShouldBe("cheapest");
-        routing.GetProperty("reason").GetString()?.ShouldContain("en düşük komisyon");
+        routing.GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("en düşük komisyon");
         // 100.000 kuruş (1.000 ₺) × %1,80 = 1.800 kuruş = 18,00 ₺
-        routing.GetProperty("reason").GetString()?.ShouldContain("18,00 ₺");
+        routing.GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("18,00 ₺");
 
         // Karar sinyalleri kayda geçti: maliyetler görünür (açıklanabilirlik)
         var signals = routing.GetProperty("signals").EnumerateArray().ToList();
@@ -194,7 +194,7 @@ public sealed class RoutingV2Tests : IDisposable
             new { bin = "540061" }, ("X-Api-Key", tenant.ApiKey));
 
         var withBin = await RoutingResultAsync(tenant.TenantId, created.Id);
-        withBin.GetProperty("reason").GetString()?.ShouldContain("Bonus kampanyası");
+        withBin.GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("Bonus kampanyası");
         withBin.GetProperty("candidates")[0].GetGuid().ShouldBe(pahali.Id);
 
         // BIN gönderilmeyen ödeme: kart kuralı eşleşmez → strateji (cheapest) devreye girer
@@ -202,7 +202,7 @@ public sealed class RoutingV2Tests : IDisposable
             new { amountMinor = 50_000, currency = "TRY", confirm = true }, ("X-Api-Key", tenant.ApiKey));
 
         var without = await RoutingResultAsync(tenant.TenantId, noBin.Id);
-        without.GetProperty("reason").GetString()?.ShouldContain("en düşük komisyon");
+        without.GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("en düşük komisyon");
         without.GetProperty("candidates")[0].GetGuid().ShouldBe(ucuz.Id);
     }
 
@@ -270,7 +270,7 @@ public sealed class RoutingV2Tests : IDisposable
         }
 
         var routing = await RoutingResultAsync(tenant.TenantId, payment.Id);
-        routing.GetProperty("reason").GetString()?.ShouldContain("Hacim bölüşümü");
+        routing.GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("Hacim bölüşümü");
     }
 
     [Fact]
@@ -558,7 +558,7 @@ public sealed class RoutingV2Tests : IDisposable
         }
 
         (await RoutingResultAsync(tenant.TenantId, payment.Id))
-            .GetProperty("reason").GetString()?.ShouldContain("API kanalı");
+            .GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("API kanalı");
     }
 
     [Fact]
@@ -650,7 +650,7 @@ public sealed class RoutingV2Tests : IDisposable
 
         // Gerekçe on-us oranını yazmalı: 100.000 kuruş × %1,20 = 1.200 kuruş = 12,00 ₺
         (await RoutingResultAsync(tenant.TenantId, onUs.Id))
-            .GetProperty("reason").GetString()?.ShouldContain("12,00 ₺");
+            .GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("12,00 ₺");
     }
 
     [Fact]
@@ -718,7 +718,7 @@ public sealed class RoutingV2Tests : IDisposable
             .ConnectorAccountId.ShouldBe(pahali.Id);
 
         (await RoutingResultAsync(tenant.TenantId, payment.Id))
-            .GetProperty("reason").GetString()?.ShouldContain("yurt dışı");
+            .GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("yurt dışı");
 
         // Karar-anı kartına ülke de yazıldı — simülatör aynı kararı yeniden oynatabilsin
         (await RoutingResultAsync(tenant.TenantId, payment.Id))
@@ -756,7 +756,7 @@ public sealed class RoutingV2Tests : IDisposable
         }
 
         (await RoutingResultAsync(tenant.TenantId, ilk))
-            .GetProperty("reason").GetString()?.ShouldContain("kalan 2.000,00 ₺");
+            .GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("kalan 2.000,00 ₺");
 
         // İlerleme uca da yansımalı
         var afterFirst = (await SendOk<List<CommitmentDto>>(
@@ -777,7 +777,7 @@ public sealed class RoutingV2Tests : IDisposable
         // Artık aciliyet 0 → öncelik sırasına dönüldü ("Pahalı POS" priority=1 ile önde)
         var ucuncu = await PayAsync(tenant.ApiKey, 100_00);
         (await RoutingResultAsync(tenant.TenantId, ucuncu))
-            .GetProperty("reason").GetString()?.ShouldContain("açığı olan taahhüt yok");
+            .GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("açığı olan taahhüt yok");
     }
 
     [Fact]
@@ -797,7 +797,7 @@ public sealed class RoutingV2Tests : IDisposable
 
         var payment = await PayAsync(tenant.ApiKey, 1_000_00);
         (await RoutingResultAsync(tenant.TenantId, payment))
-            .GetProperty("reason").GetString()?.ShouldContain("açığı olan taahhüt yok");
+            .GetProperty("reason").GetString().ShouldNotBeNull().ShouldContain("açığı olan taahhüt yok");
 
         // Kayıt SİLİNMEDİ — geçmiş rota kararlarının gerekçesi burada durur (İlke 3)
         await using var routing = _fixture.CreateRouting(PostgresFixture.TenantCtx(tenant.TenantId));

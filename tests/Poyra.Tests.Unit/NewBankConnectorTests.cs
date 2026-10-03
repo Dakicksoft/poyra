@@ -152,7 +152,7 @@ public sealed class NewConnectorContractTests
         // adının kendisinde yazılı
         new InterVposConnector(BosHttpFabrika.Ornek).Descriptor.DisplayName.ShouldContain("SERTİFİKASYON");
         new KuveytTurkConnector(BosHttpFabrika.Ornek).Descriptor.DisplayName.ShouldContain("SERTİFİKASYON");
-        new InterVposConnector(BosHttpFabrika.Ornek).Descriptor.Notes?.ShouldContain("TODO(cert)");
+        new InterVposConnector(BosHttpFabrika.Ornek).Descriptor.Notes.ShouldNotBeNull().ShouldContain("TODO(cert)");
     }
 }
 

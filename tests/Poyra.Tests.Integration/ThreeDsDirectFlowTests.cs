@@ -248,7 +248,7 @@ public sealed class ThreeDsDirectFlowTests : IDisposable
         posnet.ShouldNotBeNull("Posnet katalogda olmalı");
         posnet.DisplayName.ShouldContain("Yapı Kredi");
         // İşyeri, hesabı açmadan önce PCI sonucunu görmeli
-        posnet.Notes?.ShouldContain("PCI");
+        posnet.Notes.ShouldNotBeNull().ShouldContain("PCI");
     }
 
     [Fact]

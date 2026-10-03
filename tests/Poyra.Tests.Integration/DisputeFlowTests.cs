@@ -343,7 +343,7 @@ public sealed class DisputeFlowTests : IDisposable
 
         submitted.Status.ShouldBe("under_review");
         submitted.SubmittedAt.ShouldNotBeNull();
-        submitted.EvidenceSummary?.ShouldContain("teslim edildi");
+        submitted.EvidenceSummary.ShouldNotBeNull().ShouldContain("teslim edildi");
     }
 
     [Fact]

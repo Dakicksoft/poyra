@@ -858,7 +858,7 @@ public sealed class ReceivableLedgerTests : IDisposable
 
         var timeline = await ApiOk<List<ClaimEventDto>>(
             HttpMethod.Get, $"/v1/recon/claims/{claim.Id}/timeline", null, ("X-Api-Key", tenant.ApiKey));
-        timeline.ShouldHaveSingleItem()?.Note?.ShouldContain("kampanya");
+        timeline.ShouldHaveSingleItem().Note.ShouldNotBeNull().ShouldContain("kampanya");
     }
 
     [Fact]
