@@ -147,9 +147,9 @@ sayfasında alınır.
 
 **Tahsilat**
 - Banka-hosted 3DS akışı (kart verisi Poyra'ya hiç uğramaz) ve PCI kapsamındaki kurulumlar için direct/token akışı
-- **21 konnektör**, üç ailede *(ayrıntılı yetenek matrisi: [Konnektörler](#konnektörler))*
+- **22 konnektör**, üç ailede *(ayrıntılı yetenek matrisi: [Konnektörler](#konnektörler))*
   - **Banka sanal POS:** NestPay (12 banka) · GVP (Garanti) · PayFlex (VakıfBank) · Posnet (YKB) · InterVPOS (Denizbank) · PayFor (QNB Finansbank) · Kuveyt Türk + Vakıf Katılım (BOA)
-  - **Ödeme kuruluşları:** İyzico · Craftgate · PayNKolay · Payten/MSU (3 marka) · CCPayment (7 marka) · Moka · Tami · ParamPos · AHL Pay · PayTR
+  - **Ödeme kuruluşları:** İyzico · Craftgate · Lidio · PayNKolay · Payten/MSU (3 marka) · CCPayment (7 marka) · Moka · Tami · ParamPos · AHL Pay · PayTR
   - **E-ihracat ve test:** Stripe · Adyen · MockBank
 - Ödeme linki (sabit/açık tutar, SMS ile gönderim, QR + TR Karekod), white-label checkout (işyerinin logosu/rengi/alan adı)
 - BIN kataloğu + taksit şemaları + vade farklı teklif (quote), kuruş kaybolmaz
@@ -225,6 +225,7 @@ Yalnız 3DS'li direct sunan hesaplar hosted rotada aday listesinden **otomatik d
 |---|---|:-:|:-:|:-:|:-:|:-:|
 | `iyzico` | İyzico (IYZWSv2) | — | ✅ | ✅ | ✅ | ✅ |
 | `craftgate` | Craftgate — ortak sayfa **ve** 3DS'li direct | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lidio` | Lidio (Mobilexpress) — hosted sayfa **ve** 3DS'li direct | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `paynkolay` | PayNKolay | ✅ | — | ✅ | ✅ | ✅ |
 | `payten` | Payten/MSU — Paratika, VakıfPayS, ZiraatPay | — | ✅ | ✅ | ✅ | ✅ |
 | `ccpayment` | Sipay, QNBPay, Vepara, PayBull, Parolapara, IQmoney, HalkÖde | — | ✅ | ✅ | ✅ | ✅ |
@@ -260,7 +261,7 @@ Tablodaki boşluklar bilinçlidir:
 > [!WARNING]
 > **Sertifikasyon bekleyenler:** `intervpos` · `kuveytturk` · `vakifkatilim` · `payfor` ·
 > `iyzico` · `moka` · `payten` · `ccpayment` · `paynkolay` · `tami` · `ahlpay` ·
-> `parampos` · `paytr` · `craftgate`. Bu adaptörlerin akışı, tutar biçimi, hash yapısı ve
+> `parampos` · `paytr` · `craftgate` · `lidio`. Bu adaptörlerin akışı, tutar biçimi, hash yapısı ve
 > hata eşlemesi kurulu ve testlidir; ama alan adları, imza sırası ve durum kodları
 > sağlayıcının kendi dokümanıyla doğrulanmadan üretim trafiği açılmamalıdır. Katalogda
 > görünen adlarının sonunda **"SERTİFİKASYON BEKLİYOR"** yazar, koddaki karşılıkları
@@ -300,9 +301,9 @@ poyra/
 │  ├─ Poyra.SharedKernel        Elle yazılmış CQRS dispatcher, TenantContext/UserContext,
 │  │                            IClock, TurkishText, para/giriş yardımcıları, sır şifreleme
 │  ├─ Poyra.Persistence         ModuleDbContext tabanı, RLS + audit interceptor'ları, snake_case
-│  ├─ Connectors/               Abstractions + 21 banka/PSP adaptörü — NestPay · GVP ·
+│  ├─ Connectors/               Abstractions + 22 banka/PSP adaptörü — NestPay · GVP ·
 │  │                            PayFlex · Posnet · InterVPOS · PayFor · BOA (KuveytTürk +
-│  │                            VakıfKatılım) · İyzico · Craftgate · PayNKolay · Payten ·
+│  │                            VakıfKatılım) · İyzico · Craftgate · Lidio · PayNKolay · Payten ·
 │  │                            CCPayment · Moka · Tami · ParamPos · AhlPay · PayTR ·
 │  │                            Stripe · Adyen · MockBank
 │  ├─ Modules/                  20 iş modülü — her biri kendi DbContext + migration geçmişiyle:

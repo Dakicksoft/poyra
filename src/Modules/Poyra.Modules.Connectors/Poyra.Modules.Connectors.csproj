@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\Connectors\Poyra.Connectors.ParamPos\Poyra.Connectors.ParamPos.csproj" />
     <ProjectReference Include="..\..\Connectors\Poyra.Connectors.PayTR\Poyra.Connectors.PayTR.csproj" />
     <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Craftgate\Poyra.Connectors.Craftgate.csproj" />
+    <ProjectReference Include="..\..\Connectors\Poyra.Connectors.Lidio\Poyra.Connectors.Lidio.csproj" />
     <!-- Yalnız Contracts (ITenantDirectory) — mimari test iç ad alanlarını yasaklar -->
     <ProjectReference Include="..\Poyra.Modules.Tenancy\Poyra.Modules.Tenancy.csproj" />
   </ItemGroup>

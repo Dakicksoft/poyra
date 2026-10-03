@@ -145,6 +145,25 @@ public sealed class HostedPaymentFlowTests : IDisposable
     }
 
     [Fact]
+    public async Task Bank_return_via_GET_redirect_completes_payment()
+    {
+        // Bazı sağlayıcılar (Lidio) sonucu form POST'uyla değil, tarayıcıyı sorgu dizesiyle
+        // dönüş adresine yönlendirerek bildirir. Uç yalnız POST kabul etseydi müşteri
+        // ödemeyi bitirip 405 görür, ödeme de "işlemde" asılı kalırdı.
+        var tenant = await CreateTenantAsync();
+        await AddMockAccountAsync(tenant.ApiKey, "Mock POS", priority: 1);
+
+        var payment = await CreateAndConfirmAsync(tenant.ApiKey, 14_900);
+        var query = string.Join('&', payment.NextAction!.Fields
+            .Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+
+        var response = await _client.GetAsync($"{payment.NextAction.Url}?{query}");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await response.Content.ReadFromJsonAsync<CallbackResp>())!.Status.ShouldBe("succeeded");
+    }
+
+    [Fact]
     public async Task Reddedilen_kart_birlesik_hata_koduyla_dusmeli()
     {
         var tenant = await CreateTenantAsync();

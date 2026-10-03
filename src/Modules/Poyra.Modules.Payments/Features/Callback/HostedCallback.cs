@@ -127,9 +127,13 @@ public sealed class HostedCallbackEndpoint(IDispatcher dispatcher, PaymentsDbCon
 {
     public override void Configure()
     {
-        Post("/v1/callbacks/{connectorKey}/{token}");
+        // Bankalar sonucu form POST'uyla döner; bazı sağlayıcılar (Lidio) ise tarayıcıyı
+        // sorgu dizesiyle GET yönlendirir. İkisi de aynı yoldan geçer: kanıt hiçbir zaman
+        // dönüş parametresi değil, konnektörün imza denetimi ya da sunucu sorgusudur.
+        Verbs(Http.GET, Http.POST);
+        Routes("/v1/callbacks/{connectorKey}/{token}");
         Description(x => x.WithTags("Payments"));
-        Summary(s => s.Summary = "Banka 3DS dönüş ucu (form POST). Kimlik: tek kullanımlık belirteç.");
+        Summary(s => s.Summary = "Banka 3DS dönüş ucu (form POST ya da GET yönlendirmesi). Kimlik: tek kullanımlık belirteç.");
     }
 
     public override async Task HandleAsync(CancellationToken ct)

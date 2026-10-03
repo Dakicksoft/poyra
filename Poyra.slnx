@@ -12,6 +12,7 @@
     <Project Path="src/Connectors/Poyra.Connectors.Adyen/Poyra.Connectors.Adyen.csproj" />
     <Project Path="src/Connectors/Poyra.Connectors.CCPayment/Poyra.Connectors.CCPayment.csproj" />
     <Project Path="src/Connectors/Poyra.Connectors.Craftgate/Poyra.Connectors.Craftgate.csproj" />
+    <Project Path="src/Connectors/Poyra.Connectors.Lidio/Poyra.Connectors.Lidio.csproj" />
     <Project Path="src/Connectors/Poyra.Connectors.PayTR/Poyra.Connectors.PayTR.csproj" />
     <Project Path="src/Connectors/Poyra.Connectors.ParamPos/Poyra.Connectors.ParamPos.csproj" />
     <Project Path="src/Connectors/Poyra.Connectors.AhlPay/Poyra.Connectors.AhlPay.csproj" />
