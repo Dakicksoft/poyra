@@ -16,14 +16,13 @@ public sealed class PaymentLinkOutcomeJob(
     PaymentLinksDbContext db,
     TenantContext tenant,
     ITenantDirectory tenants,
-    IPaymentLookup payments,
-    IClock clock)
+    IPaymentLookup payments)
 {
-    public const int BatchSize = 200;
+    private const int BatchSize = 200;
 
     public async Task ResolveAsync()
     {
-        foreach (var tenantId in await tenants.GetActiveTenantIdsAsync(default))
+        foreach (var tenantId in await tenants.GetActiveTenantIdsAsync(CancellationToken.None))
         {
             tenant.Set(tenantId);
             await ResolveForTenantAsync();
@@ -47,7 +46,7 @@ public sealed class PaymentLinkOutcomeJob(
 
         foreach (var attempt in open)
         {
-            var payment = await payments.FindByPublicIdAsync(attempt.PaymentPublicId, default);
+            var payment = await payments.FindByPublicIdAsync(attempt.PaymentPublicId, CancellationToken.None);
 
             if (payment is not { IsCaptured: true })
                 continue;

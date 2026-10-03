@@ -111,7 +111,7 @@ public sealed class StripeConnectorTests : IAsyncLifetime
         var naive = _connector.ParseAndValidateCallback(
             new Dictionary<string, string> { ["session_id"] = "cs_ok" }, _credentials);
         naive.Success.ShouldBeFalse();
-        naive.RawMessage.ShouldContain("sunucu doğrulaması");
+        naive.RawMessage?.ShouldContain("sunucu doğrulaması");
     }
 
     [Fact]
@@ -220,12 +220,12 @@ public sealed class StripeConnectorTests : IAsyncLifetime
     public async Task Referanssiz_iade_ve_iptal_anlasilir_reddedilmeli()
     {
         (await _connector.RefundAsync(
-            new ConnectorRefundRequest("att_x", null, 100, "EUR"), _credentials, default))
-            .RawMessage.ShouldContain("payment_intent");
+            new ConnectorRefundRequest("att_x", null, 100, "EUR"), _credentials, CancellationToken.None))
+            .RawMessage?.ShouldContain("payment_intent");
 
         (await _connector.VoidAsync(
-            new ConnectorReference("att_x", null), _credentials, default))
-            .RawMessage.ShouldContain("payment_intent");
+            new ConnectorReference("att_x", null), _credentials, CancellationToken.None))
+            .RawMessage?.ShouldContain("payment_intent");
     }
 
     [Fact]
@@ -239,7 +239,7 @@ public sealed class StripeConnectorTests : IAsyncLifetime
 
         probe.ShouldNotBeNull();
         probe.Healthy.ShouldBeFalse();
-        probe.Detail.ShouldContain("api_key_invalid");
+        probe.Detail?.ShouldContain("api_key_invalid");
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public sealed class StripeConnectorTests : IAsyncLifetime
         // Yanlış beyan, taksitli işlemin bu hesaba yönlenip reddedilmesine yol açar.
         _connector.Descriptor.SupportsInstallments.ShouldBeFalse();
         _connector.Descriptor.SupportsRefund.ShouldBeTrue();
-        _connector.Descriptor.Notes.ShouldContain("taksidi YOKTUR");
+        _connector.Descriptor.Notes?.ShouldContain("taksidi YOKTUR");
     }
 
     // ---- Sahte Stripe -----------------------------------------------------------

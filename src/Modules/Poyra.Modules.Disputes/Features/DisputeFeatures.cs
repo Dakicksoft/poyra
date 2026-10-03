@@ -281,7 +281,7 @@ public sealed record AddEvidenceCommand(
     : Poyra.SharedKernel.Cqrs.ICommand<DisputeEvidenceResponse>;
 
 public sealed class AddEvidenceHandler(
-    DisputesDbContext db, TenantContext tenant, UserContext user, IClock clock)
+    DisputesDbContext db, TenantContext tenant, UserContext user)
     : Poyra.SharedKernel.Cqrs.ICommandHandler<AddEvidenceCommand, DisputeEvidenceResponse>
 {
     public async Task<DisputeEvidenceResponse> Handle(AddEvidenceCommand command, CancellationToken ct)

@@ -341,7 +341,7 @@ public sealed class CustomerFlowTests : IDisposable
             ("X-Api-Key", tenant.ApiKey));
         var mandate = detail.Mandates.ShouldHaveSingleItem();
         mandate.Active.ShouldBeFalse();
-        mandate.RevokedReason.ShouldContain("KVKK");
+        mandate.RevokedReason?.ShouldContain("KVKK");
     }
 
     [Fact]
