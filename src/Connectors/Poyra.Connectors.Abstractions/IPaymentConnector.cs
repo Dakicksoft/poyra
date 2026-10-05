@@ -128,8 +128,13 @@ public sealed record DirectAuthorizeResult(
     string? RawCode,
     string? RawMessage);
 
+/// <param name="RefundId">
+/// Poyra iade kimliği (ref_…). İade için tekrar-güvenli anahtar kabul eden sağlayıcılar
+/// (Lidio refundTransId) bunu gönderir: zaman aşımından sonra tekrarlanan çağrı ikinci bir
+/// iade doğurmaz.
+/// </param>
 public sealed record ConnectorRefundRequest(
-    string OrderId, string? ConnectorTxnId, long AmountMinor, string Currency);
+    string OrderId, string? ConnectorTxnId, long AmountMinor, string Currency, string? RefundId = null);
 
 public sealed record ConnectorOperationResult(
     bool Success,

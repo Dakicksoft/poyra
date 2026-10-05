@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Poyra.Connectors.Abstractions;
 
 namespace Poyra.Connectors.Lidio;
@@ -32,12 +35,85 @@ public static class LidioMessages
     }
 
     /// <summary>
+    /// Lidio sipariş numarası. Sipariş no doğrulaması açık hesaplarda (sandbox hesabı böyle)
+    /// yalnız <c>a-zA-Z0-9_</c> ve en çok 20 karakter kabul edilir; aşan istek
+    /// <c>InvalidOrderId</c> ile reddedilir. Poyra'nın <c>att_</c> + 32 hex kimliği 36
+    /// karakterdir: kısa ve geçerli kimlik olduğu gibi gider, uzunun SONU alınır — Guid v7'nin
+    /// rastgele bitleri sondadır, baştan kırpmak aynı milisaniyedeki denemeleri çakıştırırdı.
+    /// Dönüşüm deterministiktir; iptal/iade aynı numarayı yeniden üretir.
+    /// </summary>
+    public static string OrderId(string poyraId)
+    {
+        if (poyraId.Length is > 0 and <= MaxOrderIdLength
+            && poyraId.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+            return poyraId;
+
+        // Önek (att_, ref_) kırpılır: 20 karakterin hepsi ayırt edici kısma kalsın.
+        var separator = poyraId.IndexOf('_');
+        var bare = new string(poyraId[(separator + 1)..].Where(char.IsAsciiLetterOrDigit).ToArray());
+        return bare.Length > MaxOrderIdLength ? bare[^MaxOrderIdLength..] : bare;
+    }
+
+    private const int MaxOrderIdLength = 20;
+
+    /// <summary>Belge: "tek çekimde değer 0 gönderilmeli (1 değil)".</summary>
+    public static int InstallmentCount(int installments) => installments > 1 ? installments : 0;
+
+    /// <summary>
     /// Taksit sayısı Poyra'da çoktan karara bağlandı; ödeme sayfasında yalnız o seçenek
     /// açılır ki müşteri başka taksite geçip tahsilat tutarını (vade farkını) değiştiremesin.
     /// Belge gereği bu parametre kullanılırken <c>useInstallment</c> false gönderilir.
     /// </summary>
     public static string? CustomParameters(int installments)
         => installments > 1 ? $"SelectedInstallmentCount:{installments}" : null;
+
+    /// <summary>
+    /// Sunucu anahtarı <c>base64(MerchantKey:ApiPassword)</c> biçimindedir. İki parça hash
+    /// doğrulamasında gerekir; ayrı kimlik alanı istemek yerine anahtardan okunur.
+    /// </summary>
+    public static (string MerchantKey, string ApiPassword) SplitApiKey(string apiKey)
+    {
+        string decoded;
+        try
+        {
+            decoded = Encoding.UTF8.GetString(Convert.FromBase64String(apiKey));
+        }
+        catch (FormatException ex)
+        {
+            throw new ConnectorConfigurationException($"Lidio API anahtarı base64 değil ({ex.Message})");
+        }
+
+        var separator = decoded.IndexOf(':');
+        return separator > 0
+            ? (decoded[..separator], decoded[(separator + 1)..])
+            : throw new ConnectorConfigurationException("Lidio API anahtarı 'MerchantKey:ApiPassword' biçiminde değil.");
+    }
+
+    /// <summary>
+    /// Ödeme ve kart işlemi bildirimlerinin <c>ParametersHash</c> başlığı:
+    /// <c>Base64(SHA256(hamGövde + ApiPassword))</c>. Gövde ayrıştırılmadan, geldiği gibi
+    /// kullanılmalıdır — yeniden serileştirilmiş JSON aynı baytları üretmez.
+    /// </summary>
+    public static bool VerifyNotification(string rawBody, string? parametersHash, string apiPassword)
+        => parametersHash is { Length: > 0 }
+           && FixedTimeEquals(Base64Sha256(rawBody + apiPassword), parametersHash);
+
+    /// <summary>
+    /// 3D dönüşündeki <c>Hash</c>:
+    /// <c>Base64(SHA256(OrderId:MerchantKey:TotalAmount:Result:CustomerId))</c>, tutar en-US
+    /// biçiminde iki ondalıklı. Poyra parayı bu hash'e değil sunucu çağrısına bağlar; hash
+    /// yalnız kurcalanmış dönüşü ERKEN reddetmek için ek bir denetimdir.
+    /// </summary>
+    public static string ReturnHash(string orderId, string merchantKey, decimal totalAmount, string result,
+        string customerId)
+        => Base64Sha256(string.Join(':', orderId, merchantKey,
+            totalAmount.ToString("0.00", CultureInfo.GetCultureInfo("en-US")), result, customerId));
+
+    private static string Base64Sha256(string value)
+        => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static bool FixedTimeEquals(string expected, string actual)
+        => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(actual));
 
     /// <summary>
     /// Ödemenin sağlayıcıda gerçekten tamamlandığını gösteren tek sonuç. <c>UnexpectedState</c>

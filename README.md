@@ -640,6 +640,11 @@ dotnet test                # hepsi, kapsam olmadan
   375px mobil çekmece, yazdırma stilleri. Uygulamalar test sürecinde gerçek Kestrel
   portlarında ayağa kalkar — dışarıda ayakta duran servise bağımlılık yok.
 
+Beşinci, isteğe bağlı katman **sağlayıcı sandbox'ı**: `tests/Poyra.Tests.Sandbox`
+sağlayıcının gerçek test ortamına bağlanır (bugün Lidio — satış, iptal, tam/kısmi iade,
+ön provizyon, 3DS, hosted sayfa, saklı kart). Kimlik bilgileri user-secrets'tan okunur;
+yoksa testler atlanır, CI etkilenmez. Kurulum: [tests/Poyra.Tests.Sandbox/README.md](tests/Poyra.Tests.Sandbox/README.md).
+
 ### Yük profili
 
 Testlerin dördüncü katmanı doğruluğu kanıtlar; ölçek iddiası ayrı bir araca bırakıldı.
