@@ -96,6 +96,8 @@ public sealed class ConnectorsModule
             Poyra.Connectors.Craftgate.CraftgateConnector.ConnectorKey);
         services.AddKeyedSingleton<IPaymentConnector, Poyra.Connectors.Lidio.LidioConnector>(
             Poyra.Connectors.Lidio.LidioConnector.ConnectorKey);
+        // Saklı kart, ön provizyon, taksit sorgusu: birleşik arayüzde karşılığı olmayan Lidio metotları
+        services.AddSingleton<Poyra.Connectors.Lidio.LidioClient>();
         services.AddSingleton(sp => new ConnectorRegistry(sp,
             [MockBankConnector.ConnectorKey, NestPayConnector.ConnectorKey,
              GvpConnector.ConnectorKey, PayFlexConnector.ConnectorKey,

@@ -78,7 +78,8 @@ public sealed class CreateRefundHandler(PaymentsDbContext db, IConnectorGateway 
 
         var resolved = await gateway.ResolveAsync(attempt.ConnectorAccountId, ct);
         var result = await resolved.Connector.RefundAsync(
-            new ConnectorRefundRequest(attempt.PublicId, attempt.ConnectorTxnId, amount, intent.Currency),
+            new ConnectorRefundRequest(attempt.PublicId, attempt.ConnectorTxnId, amount, intent.Currency,
+                refund.PublicId),
             resolved.Credentials, ct);
 
         if (result.Success)

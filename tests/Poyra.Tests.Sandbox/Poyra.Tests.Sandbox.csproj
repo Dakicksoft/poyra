@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Sağlayıcıların GERÇEK test ortamlarına karşı uçtan uca testler. Kimlik bilgileri depoya
+    girmez: user-secrets (UserSecretsId aşağıda) ya da ortam değişkenleriyle verilir.
+    Kimlik yoksa testler ATLANIR — CI ve kimliği olmayan geliştirici kırmızı görmez.
+    Kurulum ve koşum: tests/Poyra.Tests.Sandbox/README.md
+  -->
+  <PropertyGroup>
+    <UserSecretsId>poyra-tests-sandbox</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Connectors\Poyra.Connectors.Lidio\Poyra.Connectors.Lidio.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Microsoft.Playwright" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" />
+  </ItemGroup>
+
+</Project>

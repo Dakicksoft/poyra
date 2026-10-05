@@ -454,6 +454,285 @@ public sealed class LidioTests : IAsyncLifetime
                 _credentials, default));
     }
 
+    // ---- Sipariş numarası ------------------------------------------------------
+
+    private const string LongAttemptId = "att_0199b3c2d4e57a8b9c0d1e2f3a4b5c6d";
+
+    [Theory]
+    [InlineData("att_0001", "att_0001")]                          // kısa ve geçerli: olduğu gibi
+    [InlineData(LongAttemptId, "7a8b9c0d1e2f3a4b5c6d")]           // uzun: öneksiz SON 20 karakter
+    [InlineData("ref_0199b3c2d4e57a8b9c0d1e2f3a4b5c6e", "7a8b9c0d1e2f3a4b5c6e")]
+    [InlineData("poyra-t-1", "poyrat1")]                         // izin verilmeyen karakter atılır
+    public void Order_id_fits_Lidio_validation(string poyraId, string expected)
+    {
+        var orderId = LidioMessages.OrderId(poyraId);
+
+        orderId.ShouldBe(expected);
+        orderId.Length.ShouldBeLessThanOrEqualTo(20);
+        orderId.ShouldAllBe(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+    }
+
+    [Fact]
+    public async Task Long_attempt_id_is_shortened_for_Lidio_but_returned_to_Poyra()
+    {
+        // Sandbox: doğrulaması açık hesapta 20 karakteri aşan sipariş no InvalidOrderId alır.
+        // Callback işleyicisi ise sonucu DENEME KİMLİĞİYLE eşleştirir — ikisi karışmamalı.
+        _server.Respond("/api/StartHostedPaymentProcess", HttpStatusCode.OK,
+            """{"result":"Success","systemTransId":"ST-7","redirectURL":"https://pay.lidio.test/h/7"}""");
+
+        var form = await _connector.InitiateHostedPaymentAsync(
+            new HostedPaymentRequest(LongAttemptId, 14_990, "TRY", 1, "https://cb.test", null, null),
+            _credentials, default);
+
+        var body = JsonDocument.Parse(_server.Last("/api/StartHostedPaymentProcess").Body).RootElement;
+        body.GetProperty("orderId").GetString().ShouldBe("7a8b9c0d1e2f3a4b5c6d");
+        form.ConnectorState!["poyra_lidio_order_id"].ShouldBe("7a8b9c0d1e2f3a4b5c6d");
+        form.ConnectorState["poyra_lidio_attempt_id"].ShouldBe(LongAttemptId);
+
+        _server.Respond("/api/GetHostedPaymentStatus", HttpStatusCode.OK,
+            SucceededHostedStatus("7a8b9c0d1e2f3a4b5c6d", 149.90m));
+
+        var result = await _connector.CompleteHostedCallbackAsync(
+            new Dictionary<string, string>(form.ConnectorState), _credentials, default);
+
+        result.Success.ShouldBeTrue();
+        result.OrderId.ShouldBe(LongAttemptId);
+        JsonDocument.Parse(_server.Last("/api/GetHostedPaymentStatus").Body)
+            .RootElement.GetProperty("orderId").GetString().ShouldBe("7a8b9c0d1e2f3a4b5c6d");
+    }
+
+    [Fact]
+    public async Task Void_and_refund_regenerate_the_same_Lidio_order_id()
+    {
+        _server.Respond("/api/Cancel", HttpStatusCode.OK, """{"result":"Success"}""");
+        _server.Respond("/api/Refund", HttpStatusCode.OK, """{"result":"Success"}""");
+
+        await _connector.VoidAsync(new ConnectorReference(LongAttemptId, "ST-1"), _credentials, default);
+        await _connector.RefundAsync(new ConnectorRefundRequest(LongAttemptId, "ST-1", 100, "TRY"),
+            _credentials, default);
+
+        JsonDocument.Parse(_server.Last("/api/Cancel").Body)
+            .RootElement.GetProperty("orderId").GetString().ShouldBe("7a8b9c0d1e2f3a4b5c6d");
+        JsonDocument.Parse(_server.Last("/api/Refund").Body)
+            .RootElement.GetProperty("orderId").GetString().ShouldBe("7a8b9c0d1e2f3a4b5c6d");
+    }
+
+    [Fact]
+    public async Task State_without_attempt_id_from_older_attempts_still_completes()
+    {
+        // Deneme kimliği alanı eklenmeden önce başlatılmış (henüz dönmemiş) denemeler.
+        _server.Respond("/api/GetHostedPaymentStatus", HttpStatusCode.OK, SucceededHostedStatus("att_0001", 149.90m));
+
+        var result = await _connector.CompleteHostedCallbackAsync(HostedState(), _credentials, default);
+
+        result.Success.ShouldBeTrue();
+        result.OrderId.ShouldBe("att_0001");
+    }
+
+    // ---- Taksit / ödeme gövdesi ------------------------------------------------
+
+    [Theory]
+    [InlineData(1, 0)] // belge: tek çekimde 0 gönderilir, 1 DEĞİL
+    [InlineData(0, 0)]
+    [InlineData(3, 3)]
+    public void Installment_count_uses_zero_for_single_payment(int installments, int expected)
+        => LidioMessages.InstallmentCount(installments).ShouldBe(expected);
+
+    [Fact]
+    public async Task Single_payment_sends_zero_installments_and_no_loyalty_usage()
+    {
+        _server.Respond("/api/ProcessPayment", HttpStatusCode.OK, """
+            {"result":"RedirectFormCreated",
+             "redirectForm":"<form method=\"post\" action=\"https://3d.lidio.test/acs\"></form>",
+             "paymentInfo":{"systemTransId":"ST-12"}}
+            """);
+
+        await _connector.InitiateThreeDsDirectAsync(
+            new DirectPaymentRequest("att_0012", 1_000, "TRY", 1,
+                new CardData("4546711234567894", 12, 2030, null, "123"), null, null),
+            "https://cb.test", _credentials, default);
+
+        var card = JsonDocument.Parse(_server.Last("/api/ProcessPayment").Body).RootElement
+            .GetProperty("paymentInstrumentInfo").GetProperty("newCard");
+        card.GetProperty("installmentCount").GetInt32().ShouldBe(0);
+        // Belgede zorunlu alan; puan kullanımı müşteriye sorulmadan açılmamalı.
+        card.GetProperty("loyaltyPointUsage").GetString().ShouldBe("None");
+        card.GetProperty("cardInfo").GetProperty("cardHolderName").GetString().ShouldBe("POYRA MUSTERI");
+    }
+
+    // ---- 3D'siz direct ---------------------------------------------------------
+
+    [Fact]
+    public async Task Direct_sale_without_3ds_settles_in_one_call()
+    {
+        _server.Respond("/api/ProcessPayment", HttpStatusCode.OK, """
+            {"result":"Success","resultDetail":"Success","paymentInfo":{
+              "orderId":"att_0020","systemTransId":200963426,"amountRequested":10.50,
+              "instrumentDetail":{"card":{"maskedCardNumber":"554960******0013"}},
+              "acquirerResultDetail":{"pos":{"authCode":"254529","returnCode":"00"}},
+              "resultCategory":{"categoryCode":"LD00"}}}
+            """);
+
+        var result = await _connector.AuthorizeDirectAsync(
+            new DirectPaymentRequest("att_0020", 1_050, "TRY", 1,
+                new CardData("5549602257210013", 2, 2030, "POYRA TEST", "689"), null, "203.0.113.7"),
+            _credentials, default);
+
+        result.ShouldNotBeNull();
+        result!.Success.ShouldBeTrue();
+        result.AuthCode.ShouldBe("254529");
+        result.ConnectorTxnId.ShouldBe("200963426"); // sayı olarak dönse de metin olarak okunur
+        result.MaskedPan.ShouldBe("554960******0013");
+
+        var body = JsonDocument.Parse(_server.Last("/api/ProcessPayment").Body).RootElement;
+        body.GetProperty("paymentInstrumentInfo").GetProperty("newCard")
+            .GetProperty("use3DSecure").GetBoolean().ShouldBeFalse();
+        body.TryGetProperty("returnUrl", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Direct_sale_decline_maps_bank_category()
+    {
+        _server.Respond("/api/ProcessPayment", HttpStatusCode.OK, """
+            {"result":"Refused","resultDetail":"Refused","paymentInfo":{
+              "resultCategory":{"categoryCode":"LD01"},
+              "acquirerResultDetail":{"pos":{"returnCode":"51","message":"Limit yetersiz"}}}}
+            """);
+
+        var result = await _connector.AuthorizeDirectAsync(
+            new DirectPaymentRequest("att_0021", 1_050, "TRY", 1,
+                new CardData("5549602257210013", 2, 2030, null, "689"), null, null),
+            _credentials, default);
+
+        result!.Success.ShouldBeFalse();
+        result.UnifiedCode.ShouldBe(UnifiedErrors.InsufficientFunds);
+        result.RawCode.ShouldBe("51");
+    }
+
+    [Fact]
+    public async Task Direct_sale_with_wrong_amount_is_not_success()
+    {
+        _server.Respond("/api/ProcessPayment", HttpStatusCode.OK, """
+            {"result":"Success","paymentInfo":{"orderId":"att_0022","amountRequested":1.00}}
+            """);
+
+        var result = await _connector.AuthorizeDirectAsync(
+            new DirectPaymentRequest("att_0022", 1_050, "TRY", 1,
+                new CardData("5549602257210013", 2, 2030, null, "689"), null, null),
+            _credentials, default);
+
+        result!.Success.ShouldBeFalse();
+        result.RawMessage!.ShouldContain("eşleşmiyor");
+    }
+
+    // ---- İade kimliği ----------------------------------------------------------
+
+    [Fact]
+    public async Task Refund_sends_refund_id_as_idempotency_key_and_returns_refund_txn()
+    {
+        _server.Respond("/api/Refund", HttpStatusCode.OK,
+            """{"result":"Success","paymentInfo":{"systemTransId":"200963440"}}""");
+
+        var result = await _connector.RefundAsync(
+            new ConnectorRefundRequest("att_0001", "ST-1", 500, "TRY",
+                RefundId: "ref_0199b3c2d4e57a8b9c0d1e2f3a4b5c6e"),
+            _credentials, default);
+
+        result.Success.ShouldBeTrue();
+        result.ConnectorTxnId.ShouldBe("200963440"); // asıl satışın değil iadenin numarası
+        JsonDocument.Parse(_server.Last("/api/Refund").Body)
+            .RootElement.GetProperty("refundTransId").GetString().ShouldBe("7a8b9c0d1e2f3a4b5c6e");
+    }
+
+    [Fact]
+    public async Task Refund_without_refund_id_sends_no_key()
+    {
+        // Kimliksiz iki aynı tutarlı kısmi iade Lidio'da AYRI iadelerdir (sandbox'ta doğrulandı);
+        // uydurma bir anahtar ikinciyi yanlışlıkla "mükerrer" yapardı.
+        _server.Respond("/api/Refund", HttpStatusCode.OK, """{"result":"Success"}""");
+
+        await _connector.RefundAsync(new ConnectorRefundRequest("att_0001", "ST-1", 500, "TRY"),
+            _credentials, default);
+
+        JsonDocument.Parse(_server.Last("/api/Refund").Body)
+            .RootElement.TryGetProperty("refundTransId", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Over_refund_is_reported_with_lidio_code()
+    {
+        _server.Respond("/api/Refund", HttpStatusCode.OK, """{"result":"Refused","resultDetail":"Refused"}""");
+
+        var result = await _connector.RefundAsync(new ConnectorRefundRequest("att_0001", "ST-1", 99_999, "TRY"),
+            _credentials, default);
+
+        result.Success.ShouldBeFalse();
+        result.RawCode.ShouldBe("Refused");
+        result.UnifiedCode.ShouldBe(UnifiedErrors.CardDeclined);
+    }
+
+    // ---- Yetki / hash ----------------------------------------------------------
+
+    [Fact]
+    public async Task Unauthorized_http_status_is_a_configuration_error()
+    {
+        // Yetkisiz metot 401 problem+json döner — sonuç kodu taşımaz.
+        _server.Respond("/api/PaymentInquiry", HttpStatusCode.Unauthorized,
+            """{"title":"Unauthorized","status":401}""");
+
+        var probe = await _connector.ProbeAsync(_credentials, default);
+
+        probe!.Healthy.ShouldBeFalse();
+        probe.Detail!.ShouldContain("401");
+    }
+
+    [Fact]
+    public void Api_key_splits_into_merchant_key_and_password()
+    {
+        var apiKey = Convert.ToBase64String(Encoding.UTF8.GetBytes("merchant-key-1:parola:iki-nokta"));
+
+        var (merchantKey, apiPassword) = LidioMessages.SplitApiKey(apiKey);
+
+        merchantKey.ShouldBe("merchant-key-1");
+        apiPassword.ShouldBe("parola:iki-nokta"); // yalnız İLK ':' ayırıcıdır
+    }
+
+    [Fact]
+    public void Malformed_api_key_is_a_configuration_error()
+        => Should.Throw<ConnectorConfigurationException>(() => LidioMessages.SplitApiKey("base64-degil!"));
+
+    [Fact]
+    public void Notification_hash_is_checked_against_raw_body()
+    {
+        const string body = """{"paymentResult":"Success","processInfo":{"orderId":"att_0001"}}""";
+        var hash = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(
+            Encoding.UTF8.GetBytes(body + "parola")));
+
+        LidioMessages.VerifyNotification(body, hash, "parola").ShouldBeTrue();
+        LidioMessages.VerifyNotification(body.Replace("Success", "Failed"), hash, "parola").ShouldBeFalse();
+        LidioMessages.VerifyNotification(body, hash, "baska-parola").ShouldBeFalse();
+        LidioMessages.VerifyNotification(body, null, "parola").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Return_hash_formats_amount_in_en_us_with_two_decimals()
+    {
+        // Türkçe kültürde 149,9 yazılırsa hash hiç tutmaz.
+        var previous = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+        try
+        {
+            var expected = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(
+                Encoding.UTF8.GetBytes("att_0001:mk:149.90:3DSuccess:att_0001")));
+
+            LidioMessages.ReturnHash("att_0001", "mk", 149.9m, "3DSuccess", "att_0001").ShouldBe(expected);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
+
     // ---- Yardımcılar -----------------------------------------------------------
 
     private static Dictionary<string, string> HostedState() => new()
@@ -472,78 +751,4 @@ public sealed class LidioTests : IAsyncLifetime
            "acquirerResultDetail":{"pos":{"authCode":"A12345","returnCode":"00"}},
            "resultCategory":{"categoryCode":"LD00"}}]}
         """;
-
-    // ---- Sahte sunucu ----------------------------------------------------------
-
-    private sealed record RecordedRequest(string Path, string Body, Dictionary<string, string> Headers);
-
-    private sealed class FakeLidio : IAsyncDisposable
-    {
-        private readonly Dictionary<string, (HttpStatusCode Status, string Body)> _responses = [];
-        private readonly List<RecordedRequest> _requests = [];
-        private HttpListener _listener = null!;
-
-        public string BaseUrl { get; private set; } = "";
-
-        public IReadOnlyList<string> Paths
-        {
-            get { lock (_requests) return [.. _requests.Select(r => r.Path)]; }
-        }
-
-        public void Respond(string path, HttpStatusCode status, string body)
-            => _responses[path] = (status, body);
-
-        public RecordedRequest Last(string path)
-        {
-            lock (_requests)
-                return _requests.LastOrDefault(r => r.Path == path)
-                       ?? throw new InvalidOperationException($"'{path}' hiç çağrılmadı.");
-        }
-
-        public Task StartAsync()
-        {
-            // Port İŞLETİM SİSTEMİNDEN alınır; rastgele seçim paralel testlerde çakışıyordu.
-            _listener = new HttpListener();
-            BaseUrl = BosPort.Bagla(_listener);
-
-            _ = Task.Run(async () =>
-            {
-                while (_listener.IsListening)
-                {
-                    HttpListenerContext context;
-                    try
-                    {
-                        context = await _listener.GetContextAsync();
-                    }
-                    catch
-                    {
-                        return;
-                    }
-
-                    using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
-                    var path = context.Request.Url!.AbsolutePath;
-                    var request = new RecordedRequest(path, await reader.ReadToEndAsync(),
-                        context.Request.Headers.AllKeys.Where(k => k is not null)
-                            .ToDictionary(k => k!, k => context.Request.Headers[k]!));
-
-                    lock (_requests) _requests.Add(request);
-
-                    var (status, body) = _responses.GetValueOrDefault(path, (HttpStatusCode.NotFound, "{}"));
-                    context.Response.StatusCode = (int)status;
-                    context.Response.ContentType = "application/json";
-                    await context.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(body));
-                    context.Response.Close();
-                }
-            });
-
-            return Task.CompletedTask;
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            _listener.Stop();
-            _listener.Close();
-            return ValueTask.CompletedTask;
-        }
-    }
 }

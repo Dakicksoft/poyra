@@ -1,7 +1,4 @@
 using System.Globalization;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Poyra.Connectors.Abstractions;
 
 namespace Poyra.Connectors.Lidio;
@@ -9,19 +6,27 @@ namespace Poyra.Connectors.Lidio;
 /// <summary>
 /// <b>Lidio</b> (eski adıyla Mobilexpress) ödeme kuruluşu — JSON REST.
 ///
-/// İki akışı da destekler:
+/// Üç akışı da destekler:
 /// <list type="bullet">
 /// <item>Hosted ödeme sayfası (<c>StartHostedPaymentProcess</c>) — kart Lidio'da girilir,
 /// <b>PCI kapsamı dışı</b>.</item>
 /// <item>3DS'li direct (<c>ProcessPayment</c> + <c>FinishPaymentProcess</c>) — kart bizim
 /// formumuzda toplanır, <b>PCI kapsamı içi</b>.</item>
+/// <item>3D'siz direct (<c>ProcessPayment</c>, <c>use3DSecure=false</c>) — kasadaki kartla
+/// tekrarlayan tahsilat gibi müşterinin olmadığı çekimler.</item>
 /// </list>
+/// Saklı kart, ön provizyon ve taksit sorgusu gibi birleşik arayüzde karşılığı olmayan
+/// metotlar <see cref="LidioClient"/> üzerindedir.
 ///
 /// <b>Dönüş doğrulaması:</b> Lidio tarayıcıyı sonuç parametreleriyle dönüş adresine
 /// yönlendirir; bu parametreler kanıt DEĞİLDİR. Hosted akışta sonuç
 /// <c>GetHostedPaymentStatus</c> sorgusundan okunur; direct akışta 3D dönüşü yalnız
 /// doğrulamayı bitirir — para <c>FinishPaymentProcess</c> çağrılmadan bankadan
 /// çekilmez, sonucu da o çağrının yanıtı belirler.
+///
+/// <b>Sipariş numarası:</b> Lidio en çok 20 karakter kabul eder; Poyra'nın deneme kimliği
+/// 36 karakterdir. Lidio'ya <see cref="LidioMessages.OrderId"/> ile kısaltılmışı gider,
+/// Poyra'ya ise deneme kimliğinin kendisi döner (callback işleyicisi onunla eşleştirir).
 ///
 /// Sorgu kimlikleri (sipariş no, <c>systemTransId</c>) ve tutar başlatma anında
 /// KONNEKTÖR DURUMU olarak saklanır. Durum anahtarları <c>poyra_</c> önekli: callback
@@ -31,29 +36,21 @@ namespace Poyra.Connectors.Lidio;
 /// değiştirebilir; sonuç o sipariş numarasıyla döner ve callback işleyicisi deneme
 /// kimliğiyle eşleşmeyen siparişi reddeder.
 ///
-/// <b>⚠ SERTİFİKASYON DURUMU / TODO(cert):</b> uçlar, alan adları ve sonuç kodları
-/// sağlayıcının yayımlanmış API belgesine göre yazıldı; canlı hesapla doğrulanmadı.
-/// Açık noktalar: hesabın müşteri tekil alanı (e-posta mı müşteri no mu — Poyra müşteri
-/// no olarak sipariş numarasını gönderiyor), servis adresinin <c>/api</c> öneki.
+/// <b>Doğrulama durumu (Eki 2026):</b> satış, ön provizyon/kapama, iptal, tam ve kısmi iade,
+/// 3DS direct, hosted sayfa ve saklı kart akışları Lidio test ortamında uçtan uca koşuldu
+/// (<c>tests/Poyra.Tests.Sandbox</c>). Servis adresinin <c>/api</c> öneki ve müşteri tekil
+/// alanının müşteri no olduğu orada doğrulandı.
+/// <b>TODO(cert):</b> canlı hesapla sertifikasyon ve canlıda API çağrısı yapılan IP'lerin
+/// Lidio'ya tanımlatılması.
 /// </summary>
 public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaymentConnector
 {
     public const string ConnectorKey = "lidio";
     public const string HttpClientName = "poyra-lidio";
 
-    private const string StartHostedPath = "/StartHostedPaymentProcess";
-    private const string HostedStatusPath = "/GetHostedPaymentStatus";
-    private const string ProcessPaymentPath = "/ProcessPayment";
-    private const string FinishPaymentPath = "/FinishPaymentProcess";
-    private const string CancelPath = "/Cancel";
-    private const string RefundPath = "/Refund";
-    private const string InquiryPath = "/PaymentInquiry";
-
-    // Poyra yalnız yeni kartla ödeme açar; kayıtlı kart Lidio'nun değil Poyra kasasının işi.
-    private const string CardInstrument = "NewCard";
-
     // Tarayıcının dönüşte gönderdiği OrderId/SystemTransId bunların üzerine yazamasın diye önekli.
     private const string StateOrderId = "poyra_lidio_order_id";
+    private const string StateAttemptId = "poyra_lidio_attempt_id";
     private const string StateSystemTransId = "poyra_lidio_system_trans_id";
     private const string StateAmount = "poyra_lidio_amount";
     private const string StateCurrency = "poyra_lidio_currency";
@@ -61,10 +58,7 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
     private const string FlowHosted = "hosted";
     private const string FlowDirect = "direct";
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
+    private readonly LidioClient _client = new(httpClientFactory);
 
     public string Key => ConnectorKey;
 
@@ -80,56 +74,38 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
         SupportsInstallments: true,
         SupportsVoid: true,
         SupportsRefund: true,
-        Notes: "Hosted ödeme sayfası (PCI kapsamı dışı) ve 3DS'li direct (PCI kapsamı içi) "
+        Notes: "Hosted ödeme sayfası (PCI kapsamı dışı), 3DS'li ve 3D'siz direct (PCI kapsamı içi) "
                + "birlikte desteklenir. Dönüş parametreleri kanıt sayılmaz: hosted sonuç "
                + "GetHostedPaymentStatus ile sorgulanır, direct'te para FinishPaymentProcess "
-               + "ile çekilir. Canlıda API çağrısı yapılan IP'ler Lidio'ya tanımlatılmalıdır "
-               + "(aksi hâlde InvalidCredential). TODO(cert).");
+               + "ile çekilir. Akışlar Lidio test ortamında doğrulandı; canlıda API çağrısı "
+               + "yapılan IP'ler Lidio'ya tanımlatılmalıdır (aksi hâlde InvalidCredential). TODO(cert).");
 
 
     public async Task<HostedPaymentForm> InitiateHostedPaymentAsync(
         HostedPaymentRequest request, ConnectorCredentials credentials, CancellationToken ct)
     {
-        var amount = LidioMessages.Amount(request.AmountMinor);
+        var orderId = LidioMessages.OrderId(request.OrderId);
         var currency = LidioMessages.Currency(request.Currency);
-        var installments = Math.Max(1, request.Installments);
 
-        using var response = await SendAsync(credentials, StartHostedPath, new
+        var response = await _client.StartHostedPaymentAsync(new LidioHostedPayment
         {
-            orderId = request.OrderId,
-            merchantProcessId = request.OrderId,
-            totalAmount = amount,
-            currency,
-            customerInfo = new { customerId = request.OrderId },
-            paymentInstruments = new[] { CardInstrument },
-            paymentInstrumentInfo = new
-            {
-                card = new
-                {
-                    processType = "sales",
-                    // Taksit seçeneği müşteriye AÇILMAZ — sayı customParameters ile sabitlenir.
-                    useInstallment = false,
-                    useLoyaltyPoints = false,
-                    newCard = new { threeDSecureMode = "Mandatory", useIVRForCardEntry = false },
-                },
-            },
-            customParameters = LidioMessages.CustomParameters(installments),
-            returnUrl = request.CallbackUrl,
-            clientType = "Web",
-            clientIp = request.CustomerIp,
-        }, ct);
+            OrderId = orderId,
+            AmountMinor = request.AmountMinor,
+            Currency = currency,
+            Customer = new LidioCustomer(orderId),
+            ReturnUrl = request.CallbackUrl,
+            Installments = Math.Max(1, request.Installments),
+            ClientIp = request.CustomerIp,
+        }, credentials, ct);
 
-        var root = response.RootElement;
-        var redirectUrl = Text(root, "redirectURL");
-
-        if (!LidioMessages.IsApproved(Text(root, "result")) || string.IsNullOrWhiteSpace(redirectUrl))
+        if (!response.IsSuccess || string.IsNullOrWhiteSpace(response.RedirectUrl))
             throw new ConnectorUnavailableException(
-                $"Lidio ödeme sayfası açılamadı: {Text(root, "result")} {Text(root, "resultMessage")}");
+                $"Lidio ödeme sayfası açılamadı: {response.Result} {response.ResultMessage}");
 
         // Lidio form değil hazır ADRES döner — GET yönlendirmesi (alan yok).
         return new HostedPaymentForm(
-            redirectUrl, new Dictionary<string, string>(), Method: "GET",
-            ConnectorState: BuildState(FlowHosted, request.OrderId, Text(root, "systemTransId"),
+            response.RedirectUrl, new Dictionary<string, string>(), Method: "GET",
+            ConnectorState: BuildState(FlowHosted, request.OrderId, orderId, response.SystemTransId,
                 request.AmountMinor, currency));
     }
 
@@ -138,53 +114,53 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
         DirectPaymentRequest request, string callbackUrl, ConnectorCredentials credentials,
         CancellationToken ct)
     {
+        var orderId = LidioMessages.OrderId(request.OrderId);
         var currency = LidioMessages.Currency(request.Currency);
 
-        using var response = await SendAsync(credentials, ProcessPaymentPath, new
-        {
-            orderId = request.OrderId,
-            merchantProcessId = request.OrderId,
-            totalAmount = LidioMessages.Amount(request.AmountMinor),
-            currency,
-            customerInfo = new { customerId = request.OrderId },
-            paymentInstrument = CardInstrument,
-            paymentInstrumentInfo = new
-            {
-                newCard = new
-                {
-                    processType = "sales",
-                    cardInfo = new
-                    {
-                        cardHolderName = request.Card.HolderName ?? "POYRA MUSTERI",
-                        cardNumber = request.Card.Pan,
-                        lastMonth = request.Card.ExpiryMonth,
-                        lastYear = request.Card.ExpiryYear,
-                    },
-                    cvv = request.Card.Cvv,
-                    use3DSecure = true,
-                    installmentCount = Math.Max(1, request.Installments),
-                    saveCardTemporarily = false,
-                    saveAfterSuccess = false,
-                },
-            },
-            returnUrl = callbackUrl,
-            clientType = "Web",
-            clientIp = request.CustomerIp,
-        }, ct);
+        var response = await _client.ProcessPaymentAsync(
+            CardPayment(request, orderId, currency, use3DSecure: true, callbackUrl), credentials, ct);
 
-        var root = response.RootElement;
-
-        if (Text(root, "result") != "RedirectFormCreated"
-            || ConnectorHtml.ExtractForm(Text(root, "redirectForm") ?? string.Empty) is not { } form)
+        if (!response.RequiresRedirect
+            || ConnectorHtml.ExtractForm(response.RedirectForm ?? string.Empty) is not { } form)
             throw new ConnectorUnavailableException(
-                $"Lidio 3D formu dönmedi: {Text(root, "result")} {Text(root, "resultDetail")} "
-                + Text(root, "resultMessage"));
-
-        var systemTransId = Text(Child(root, "paymentInfo"), "systemTransId") ?? Text(root, "systemTransId");
+                $"Lidio 3D formu dönmedi: {response.Result} {response.ResultDetail} {response.ResultMessage}");
 
         return new HostedPaymentForm(
             form.ActionUrl, form.Fields,
-            ConnectorState: BuildState(FlowDirect, request.OrderId, systemTransId, request.AmountMinor, currency));
+            ConnectorState: BuildState(FlowDirect, request.OrderId, orderId,
+                response.PaymentInfo?.SystemTransId, request.AmountMinor, currency));
+    }
+
+    /// <summary>
+    /// 3D'siz satış: tek çağrıda sonuçlanır. Kart verisi Poyra'dan geçer (PCI kapsamı);
+    /// kart Lidio'da SAKLANMAZ — Poyra'nın kasası varken ikinci bir kart deposu PCI yüküdür.
+    /// </summary>
+    public async Task<DirectAuthorizeResult?> AuthorizeDirectAsync(
+        DirectPaymentRequest request, ConnectorCredentials credentials, CancellationToken ct)
+    {
+        var orderId = LidioMessages.OrderId(request.OrderId);
+        var currency = LidioMessages.Currency(request.Currency);
+
+        var response = await _client.ProcessPaymentAsync(
+            CardPayment(request, orderId, currency, use3DSecure: false, returnUrl: null), credentials, ct);
+
+        var payment = response.PaymentInfo;
+        if (response.IsSuccess)
+        {
+            if (Mismatch(payment, orderId, request.AmountMinor) is { } mismatch)
+                return new DirectAuthorizeResult(false, null, payment?.SystemTransId, null,
+                    UnifiedErrors.ProcessingError, null, mismatch);
+
+            return new DirectAuthorizeResult(true, payment?.Pos?.AuthCode, payment?.SystemTransId,
+                payment?.Card?.MaskedCardNumber, UnifiedErrors.None, payment?.ResultCategory?.CategoryCode, null);
+        }
+
+        // 3D zorunlu hesap/kart 3D'siz isteği RedirectFormCreated ile karşılar; o da başarı
+        // değildir — para çekilmedi, işlem hatası olarak döner.
+        var declined = Declined(request.OrderId, payment, response.ResultDetail ?? response.Result,
+            response.ResultMessage);
+        return new DirectAuthorizeResult(false, null, payment?.SystemTransId, null,
+            declined.UnifiedCode, declined.RawCode, declined.RawMessage);
     }
 
     /// <summary>
@@ -195,7 +171,7 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
     /// </summary>
     public HostedCallbackResult ParseAndValidateCallback(
         IReadOnlyDictionary<string, string> form, ConnectorCredentials credentials)
-        => new(false, Field(form, StateOrderId) ?? Field(form, "OrderId") ?? string.Empty,
+        => new(false, Field(form, StateAttemptId) ?? Field(form, StateOrderId) ?? Field(form, "OrderId") ?? string.Empty,
             null, null, null, null,
             UnifiedErrors.ProcessingError, Field(form, "Result"),
             "Lidio dönüşü sunucu çağrısıyla kesinleştirilmelidir (CompleteHostedCallbackAsync).");
@@ -211,138 +187,127 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
             return Failed(Field(form, "OrderId") ?? string.Empty,
                 "Lidio sorgu kimliği dönüşte yok; sonuç doğrulanamadı.");
 
+        // Deneme kimliği alanı eklenmeden önce başlatılmış denemelerde iki kimlik aynıydı.
+        var attemptId = Field(form, StateAttemptId) ?? orderId;
+
         // systemTransId başlatma yanıtında yoksa dönüşteki değer kullanılır. Bu güvenlidir:
         // sipariş no durumdan geliyor ve Lidio ikisini birlikte eşler — başka bir siparişin
         // işlem numarası bu siparişle sorgulanınca bulunamaz.
         var systemTransId = Field(form, StateSystemTransId) ?? Field(form, "SystemTransId");
         if (string.IsNullOrEmpty(systemTransId))
-            return Failed(orderId, "Lidio işlem numarası (systemTransId) yok; sonuç doğrulanamadı.");
+            return Failed(attemptId, "Lidio işlem numarası (systemTransId) yok; sonuç doğrulanamadı.");
 
         var amountMinor = long.TryParse(Field(form, StateAmount), CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : (long?)null;
 
         return Field(form, StateFlow) == FlowDirect
-            ? await FinishDirectAsync(credentials, orderId, systemTransId, amountMinor, Field(form, StateCurrency), ct)
-            : await QueryHostedAsync(credentials, orderId, systemTransId, amountMinor, ct);
+            ? await FinishDirectAsync(credentials, attemptId, orderId, systemTransId, amountMinor,
+                Field(form, StateCurrency), ct)
+            : await QueryHostedAsync(credentials, attemptId, orderId, systemTransId, amountMinor, ct);
     }
 
     private async Task<HostedCallbackResult> QueryHostedAsync(
-        ConnectorCredentials credentials, string orderId, string systemTransId, long? amountMinor,
-        CancellationToken ct)
+        ConnectorCredentials credentials, string attemptId, string orderId, string systemTransId,
+        long? amountMinor, CancellationToken ct)
     {
-        using var response = await SendAsync(credentials, HostedStatusPath, new
-        {
-            systemTransId,
-            orderId,
-            clientType = "Web",
-        }, ct);
-
-        var root = response.RootElement;
+        var response = await _client.GetHostedPaymentStatusAsync(orderId, systemTransId, credentials, ct);
 
         // Hosted sayfada müşteri reddedilen karttan sonra başka kartla yeniden deneyebilir;
         // liste bu yüzden birden çok deneme taşıyabilir. Aranan, başarılı ve sonradan
         // otomatik iptal EDİLMEMİŞ olanı.
-        var payments = Child(root, "paymentList");
-        var succeeded = Items(payments).FirstOrDefault(p =>
-            Flag(p, "isSuccess") == true && Flag(p, "isCancelled") != true);
+        var payments = response.PaymentList ?? [];
+        var succeeded = payments.FirstOrDefault(p => p.IsSuccess == true && p.IsCancelled != true);
 
-        if (LidioMessages.IsApproved(Text(root, "result"))
-            && LidioMessages.IsApproved(Text(root, "paymentResult"))
-            && succeeded.ValueKind == JsonValueKind.Object)
-            return Approved(orderId, succeeded, amountMinor);
+        if (response.IsSuccess && LidioMessages.IsApproved(response.PaymentResult) && succeeded is not null)
+            return Approved(attemptId, orderId, succeeded, amountMinor);
 
-        var last = Items(payments).LastOrDefault();
-        return Declined(orderId, last, Text(root, "paymentResult") ?? Text(root, "result"),
-            Text(root, "resultMessage"));
+        return Declined(attemptId, payments.LastOrDefault(), response.PaymentResult ?? response.Result,
+            response.ResultMessage);
     }
 
     private async Task<HostedCallbackResult> FinishDirectAsync(
-        ConnectorCredentials credentials, string orderId, string systemTransId, long? amountMinor,
-        string? currency, CancellationToken ct)
+        ConnectorCredentials credentials, string attemptId, string orderId, string systemTransId,
+        long? amountMinor, string? currency, CancellationToken ct)
     {
         // 3D dönüşünün "3DSuccess"/"3DFailed" iddiasına bakılmaz: başarısız doğrulamayı
         // Lidio bu çağrıda zaten ThreeDValidationFailed ile reddeder.
-        using var response = await SendAsync(credentials, FinishPaymentPath, new
+        var response = await _client.FinishPaymentAsync(new LidioFinishPayment
         {
-            orderId,
-            systemTransId,
-            totalAmount = amountMinor is { } minor ? LidioMessages.Amount(minor) : (decimal?)null,
-            currency,
-            paymentInstrument = CardInstrument,
-            paymentInstrumentInfo = new { newCard = new { } },
-            clientType = "Web",
-        }, ct);
+            OrderId = orderId,
+            SystemTransId = systemTransId,
+            AmountMinor = amountMinor,
+            Currency = currency,
+        }, credentials, ct);
 
-        var root = response.RootElement;
-        var payment = Child(root, "paymentInfo");
-
-        return LidioMessages.IsApproved(Text(root, "result"))
-            ? Approved(orderId, payment, amountMinor)
-            : Declined(orderId, payment, Text(root, "resultDetail") ?? Text(root, "result"),
-                Text(root, "resultMessage"));
+        return response.IsSuccess
+            ? Approved(attemptId, orderId, response.PaymentInfo, amountMinor)
+            : Declined(attemptId, response.PaymentInfo, response.ResultDetail ?? response.Result,
+                response.ResultMessage);
     }
 
-    private static HostedCallbackResult Approved(string orderId, JsonElement payment, long? amountMinor)
+    private static HostedCallbackResult Approved(
+        string attemptId, string orderId, LidioPaymentInfo? payment, long? amountMinor)
     {
-        // Sağlayıcı belgesi açıkça ister: dönen tutar sepet tutarıyla karşılaştırılmalı.
-        // Tutmayan bir "başarı" ya kurcalanmış bir oturumdur ya da bizim hatamız; ikisinde
-        // de ödendi demek yanlış olur — fark mutabakatta yakalanır.
-        var requested = ReadDecimal(payment, "amountRequested");
-        if (amountMinor is { } minor && requested is { } lidioAmount && lidioAmount != LidioMessages.Amount(minor))
-            return Failed(orderId,
-                $"Lidio tutarı ({lidioAmount.ToString(CultureInfo.InvariantCulture)}) sipariş tutarıyla eşleşmiyor.");
-
-        var returnedOrderId = Text(payment, "orderId");
-        if (returnedOrderId is not null && returnedOrderId != orderId)
-            return Failed(orderId, "Lidio yanıtındaki sipariş numarası eşleşmiyor.");
-
-        var card = Child(Child(payment, "instrumentDetail"), "card");
-        var pos = Child(Child(payment, "acquirerResultDetail"), "pos");
+        if (Mismatch(payment, orderId, amountMinor) is { } mismatch)
+            return Failed(attemptId, mismatch);
 
         return new HostedCallbackResult(
-            true, orderId,
-            AuthCode: Text(pos, "authCode"),
-            ConnectorTxnId: Text(payment, "systemTransId"),
-            MaskedPan: Text(card, "maskedCardNumber"),
-            CardBank: Text(card, "cardBankName"),
-            UnifiedErrors.None, Text(Child(payment, "resultCategory"), "categoryCode"), null);
+            true, attemptId,
+            AuthCode: payment?.Pos?.AuthCode,
+            ConnectorTxnId: payment?.SystemTransId,
+            MaskedPan: payment?.Card?.MaskedCardNumber,
+            CardBank: payment?.Card?.CardBankName,
+            UnifiedErrors.None, payment?.ResultCategory?.CategoryCode, null);
+    }
+
+    /// <summary>
+    /// Sağlayıcı belgesi açıkça ister: dönen tutar sepet tutarıyla karşılaştırılmalı.
+    /// Tutmayan bir "başarı" ya kurcalanmış bir oturumdur ya da bizim hatamız; ikisinde
+    /// de ödendi demek yanlış olur — fark mutabakatta yakalanır.
+    /// </summary>
+    private static string? Mismatch(LidioPaymentInfo? payment, string orderId, long? amountMinor)
+    {
+        if (amountMinor is { } minor && payment?.AmountRequested is { } lidioAmount
+            && lidioAmount != LidioMessages.Amount(minor))
+            return $"Lidio tutarı ({lidioAmount.ToString(CultureInfo.InvariantCulture)}) sipariş tutarıyla eşleşmiyor.";
+
+        if (payment?.OrderId is { } returned && returned != orderId)
+            return "Lidio yanıtındaki sipariş numarası eşleşmiyor.";
+
+        return null;
     }
 
     private static HostedCallbackResult Declined(
-        string orderId, JsonElement payment, string? resultCode, string? resultMessage)
+        string attemptId, LidioPaymentInfo? payment, string? resultCode, string? resultMessage)
     {
-        var category = Text(Child(payment, "resultCategory"), "categoryCode");
-        var pos = Child(Child(payment, "acquirerResultDetail"), "pos");
+        var category = payment?.ResultCategory?.CategoryCode;
 
         return new HostedCallbackResult(
-            false, orderId, null, null, null, null,
+            false, attemptId, null, null, null, null,
             LidioMessages.UnifiedError(category, resultCode),
             // Ham kod önceliği: bankanın kendi kodu → Lidio kategorisi → Lidio sonucu.
-            Text(pos, "returnCode") ?? category ?? resultCode,
-            Text(pos, "message") ?? resultMessage);
+            NonEmpty(payment?.Pos?.ReturnCode) ?? category ?? resultCode,
+            NonEmpty(payment?.Pos?.Message) ?? NonEmpty(resultMessage));
     }
 
 
-    public Task<ConnectorOperationResult> VoidAsync(
+    public async Task<ConnectorOperationResult> VoidAsync(
         ConnectorReference reference, ConnectorCredentials credentials, CancellationToken ct)
-        => OperationAsync(credentials, CancelPath, new
-        {
-            orderId = reference.OrderId,
-            paymentInstrument = CardInstrument,
-            clientType = "Web",
-        }, reference.ConnectorTxnId, LidioMessages.IsApproved, ct);
+    {
+        var response = await _client.CancelAsync(LidioMessages.OrderId(reference.OrderId), credentials, ct);
+        return Operation(response, "Cancel", reference.ConnectorTxnId, LidioMessages.IsApproved);
+    }
 
-    public Task<ConnectorOperationResult> RefundAsync(
+    public async Task<ConnectorOperationResult> RefundAsync(
         ConnectorRefundRequest request, ConnectorCredentials credentials, CancellationToken ct)
-        => OperationAsync(credentials, RefundPath, new
-        {
-            orderId = request.OrderId,
-            totalAmount = LidioMessages.Amount(request.AmountMinor),
-            currency = LidioMessages.Currency(request.Currency),
-            paymentInstrument = CardInstrument,
-            clientType = "Web",
-        }, request.ConnectorTxnId, LidioMessages.IsRefundApproved, ct);
+    {
+        var response = await _client.RefundAsync(
+            LidioMessages.OrderId(request.OrderId), request.AmountMinor, request.Currency,
+            request.RefundId is { } refundId ? LidioMessages.OrderId(refundId) : null,
+            credentials, ct);
+        return Operation(response, "Refund", request.ConnectorTxnId, LidioMessages.IsRefundApproved);
+    }
 
     public async Task<ConnectorProbeResult?> ProbeAsync(ConnectorCredentials credentials, CancellationToken ct)
     {
@@ -350,18 +315,11 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
         {
             // Var olmayan siparişi sorgulamak para hareketi yaratmaz; yanıtın "bulunamadı"
             // olması anahtarın, işyeri kodunun ve IP tanımının geçerli olduğunu gösterir.
-            using var response = await SendAsync(credentials, InquiryPath, new
-            {
-                orderId = "poyra-canary-000",
-                paymentInstrument = CardInstrument,
-                paymentInquiryInstrumentInfo = new { card = new { processType = "sales" } },
-                clientType = "Web",
-            }, ct);
+            var response = await _client.PaymentInquiryAsync("poyra_canary_000", credentials, ct);
 
-            var result = Text(response.RootElement, "result");
-            return result == "InvalidCredential"
+            return response.IsNotAuthorized
                 ? new ConnectorProbeResult(false, "Lidio kimlik bilgisi ya da IP tanımı geçersiz.")
-                : new ConnectorProbeResult(true, $"Lidio erişilebilir ({result}).");
+                : new ConnectorProbeResult(true, $"Lidio erişilebilir ({response.Result}).");
         }
         catch (Exception ex) when (ex is ConnectorUnavailableException or ConnectorConfigurationException)
         {
@@ -371,13 +329,29 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
 
     // ---- İç yardımcılar --------------------------------------------------------
 
+    private static LidioCardPayment CardPayment(
+        DirectPaymentRequest request, string orderId, string currency, bool use3DSecure, string? returnUrl)
+        => new()
+        {
+            OrderId = orderId,
+            AmountMinor = request.AmountMinor,
+            Currency = currency,
+            Customer = new LidioCustomer(orderId),
+            Installments = request.Installments,
+            Use3DSecure = use3DSecure,
+            ReturnUrl = returnUrl,
+            ClientIp = request.CustomerIp,
+            NewCard = request.Card with { HolderName = request.Card.HolderName ?? "POYRA MUSTERI" },
+        };
+
     private static Dictionary<string, string> BuildState(
-        string flow, string orderId, string? systemTransId, long amountMinor, string currency)
+        string flow, string attemptId, string orderId, string? systemTransId, long amountMinor, string currency)
     {
         var state = new Dictionary<string, string>
         {
             [StateFlow] = flow,
             [StateOrderId] = orderId,
+            [StateAttemptId] = attemptId,
             [StateAmount] = amountMinor.ToString(CultureInfo.InvariantCulture),
             [StateCurrency] = currency,
         };
@@ -386,100 +360,27 @@ public sealed class LidioConnector(IHttpClientFactory httpClientFactory) : IPaym
         return state;
     }
 
-    private async Task<ConnectorOperationResult> OperationAsync(
-        ConnectorCredentials credentials, string path, object body, string? txnId,
-        Func<string?, bool> isApproved, CancellationToken ct)
+    private static ConnectorOperationResult Operation(
+        LidioPaymentResponse response, string method, string? originalTxnId, Func<string?, bool> isApproved)
     {
-        using var response = await SendAsync(credentials, path, body, ct);
-        var root = response.RootElement;
-        var result = Text(root, "result");
+        // İptal/iade kendi işlem numarasını alır; dönmezse asıl işleminki korunur.
+        if (isApproved(response.Result))
+            return ConnectorOperationResult.Ok(response.PaymentInfo?.SystemTransId ?? originalTxnId);
 
-        if (isApproved(result))
-            return ConnectorOperationResult.Ok(txnId);
-
-        var detail = Text(root, "resultDetail") ?? result;
+        var detail = response.ResultDetail ?? response.Result;
         return ConnectorOperationResult.Fail(
             LidioMessages.UnifiedError(null, detail), detail,
-            Text(root, "resultMessage") ?? $"Lidio {path.TrimStart('/')} onaylanmadı ({result}).");
-    }
-
-    private async Task<JsonDocument> SendAsync(
-        ConnectorCredentials credentials, string path, object body, CancellationToken ct)
-    {
-        // Kimlik alanları HTTP'den ÖNCE okunur: eksik alan ağ hatası gibi görünmesin,
-        // işyerine "POS bilgilerinizi tamamlayın" olarak dönsün.
-        var url = credentials.Require("gateway_base").TrimEnd('/') + path;
-        var authorization = LidioMessages.Authorization(credentials.Require("api_key"));
-        var merchantCode = credentials.Require("merchant_code");
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = new StringContent(
-                JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json"),
-        };
-        request.Headers.TryAddWithoutValidation("Authorization", authorization);
-        request.Headers.TryAddWithoutValidation("MerchantCode", merchantCode);
-        request.Headers.TryAddWithoutValidation("Accept", "application/json");
-
-        try
-        {
-            var client = httpClientFactory.CreateClient(HttpClientName);
-            using var response = await client.SendAsync(request, ct);
-            var content = await response.Content.ReadAsStringAsync(ct);
-
-            // 4xx gövdesi sonuç kodunu taşır ve çağıran onu birleşik koda çevirebilmeli;
-            // yalnız 5xx/ağ hatası "konnektör ayakta değil" sayılır.
-            if ((int)response.StatusCode >= 500)
-                throw new ConnectorUnavailableException($"Lidio {path} → {(int)response.StatusCode}.");
-
-            return JsonDocument.Parse(content);
-        }
-        catch (HttpRequestException ex)
-        {
-            // Ham HttpRequestException sızarsa rota katmanı bunu failover'a uygun saymaz
-            throw new ConnectorUnavailableException($"Lidio {path} ucuna ulaşılamadı.", ex);
-        }
-        catch (JsonException ex)
-        {
-            throw new ConnectorUnavailableException("Lidio yanıtı JSON değil.", ex);
-        }
+            NonEmpty(response.ResultMessage) ?? $"Lidio {method} onaylanmadı ({response.Result}).");
     }
 
     private static HostedCallbackResult Failed(string orderId, string message)
         => new(false, orderId, null, null, null, null, UnifiedErrors.ProcessingError, null, message);
+
+    private static string? NonEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     /// <summary>Dönüş sorgu dizesinden gelir; anahtarların büyük/küçük harfine güvenilmez.</summary>
     private static string? Field(IReadOnlyDictionary<string, string> form, string name)
         => form.TryGetValue(name, out var value)
             ? value
             : form.FirstOrDefault(kv => kv.Key.Equals(name, StringComparison.OrdinalIgnoreCase)).Value;
-
-    private static JsonElement Child(JsonElement element, string name)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var child)
-            ? child
-            : default;
-
-    private static IEnumerable<JsonElement> Items(JsonElement element)
-        => element.ValueKind == JsonValueKind.Array ? element.EnumerateArray() : [];
-
-    private static bool? Flag(JsonElement element, string name)
-        => Child(element, name).ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => null,
-        };
-
-    private static decimal? ReadDecimal(JsonElement element, string name)
-        => Child(element, name) is { ValueKind: JsonValueKind.Number } number && number.TryGetDecimal(out var d)
-            ? d
-            : null;
-
-    private static string? Text(JsonElement element, string name)
-        => Child(element, name) switch
-        {
-            { ValueKind: JsonValueKind.String } text => text.GetString(),
-            { ValueKind: JsonValueKind.Number } number => number.ToString(),
-            _ => null,
-        };
 }
