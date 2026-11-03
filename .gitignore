@@ -24,3 +24,4 @@ appsettings.Local.json
 # Claude Code yerel oturum dosyaları (izinler, önizleme, çalışma ağaçları)
 .claude/
 /docs/superpowers
+/.archify
