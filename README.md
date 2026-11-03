@@ -325,6 +325,21 @@ poyra/
 
 ### Bileşenler
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/gorseller/00-mimari-dark.webp" />
+  <img src="docs/gorseller/00-mimari-light.webp" alt="Poyra çalışma zamanı mimarisi: üç host (Api, Panel, Checkout), iş modülleri, konnektörler, PostgreSQL ve dış sistemler" />
+</picture>
+
+**Ana yol** (yeşil): işyeri sunucusu `X-Api-Key` ile Poyra.Api'ye gelir → iş modülleri rota
+kararını verir → konnektör bankada 3DS'i başlatır → banka tek kullanımlık belirteçli callback ile
+döner (kırmızı) → Hangfire outbox'ı işyerine HMAC imzalı webhook atar (kesikli mor).
+**Güven sınırları:** üç hostun portları yalnız `127.0.0.1`'e yayımlanır ve önlerine kuruluşun TLS
+ters vekili konur; PostgreSQL'in dışarı açık portu yoktur ve uygulama `poyra_app`
+(NOSUPERUSER, NOBYPASSRLS) rolüyle bağlanır.
+
+<details>
+<summary>Aynı şemanın Mermaid sürümü</summary>
+
 ```mermaid
 flowchart LR
     subgraph Istemciler["İstemciler"]
@@ -359,6 +374,8 @@ flowchart LR
     API -.->|"HMAC imzalı webhook"| M
     DB -.->|LISTEN/NOTIFY| PANEL
 ```
+
+</details>
 
 - **Panel neden API'ye HTTP atmaz?** Modüler monolit avantajı: Panel aynı süreçte aynı
   komut/sorgu yolunu (dispatcher) doğrudan çağırır — çift serileştirme ve ek gecikme yok.
